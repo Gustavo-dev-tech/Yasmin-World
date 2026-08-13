@@ -11,17 +11,13 @@ import { DebugHelper } from './DebugHelper.js';
 import { GameModeManager } from './game/GameModeManager.js';
 import { Minimap } from './ui/Minimap.js';
 import { Dogs } from './world/Dogs.js';
-//animate()
-// ============================================================
-// TOGGLES DE EMERGÊNCIA — só mude se, depois de testar, o
-// movimento ainda sair invertido em algum eixo.
-// ============================================================
-const INVERT_FORWARD = false; // true se W andar para trás
-const INVERT_STRAFE = false;  // true se A/D estiverem trocados
-const dogs = new Dogs({ scene, player });
 
-// Invoca um companheiro ao iniciar (ex: 'golden')
-dogs.spawnCompanion('golden');
+// ============================================================
+// TOGGLES DE EMERGÊNCIA
+// ============================================================
+const INVERT_FORWARD = false;
+const INVERT_STRAFE = false;
+
 // ==========================================
 // CENA, CÂMERA, RENDERER
 // ==========================================
@@ -60,13 +56,13 @@ const collectibles = new Collectibles({ scene });
 
 const dragon = new Dragon({
   scene,
-  center: new THREE.Vector3(0, 22, -50), // Voa no céu sobre o Castelo
+  center: new THREE.Vector3(0, 22, -50),
   radius: 35,
   speed: 0.6,
 });
 
 // ==========================================
-// PLAYER E INPUT
+// PLAYER, INPUT, MINIMAPA E CÃES
 // ==========================================
 const player = new CharacterController({
   scene,
@@ -79,9 +75,14 @@ const player = new CharacterController({
   height: CONFIG.PLAYER_HEIGHT,
   speed: CONFIG.PLAYER_SPEED,
 });
+
 const gameModeManager = new GameModeManager({ scene, player });
 const minimap = new Minimap({ player, gameModeManager });
+const dogs = new Dogs({ scene, player });
 const input = new Input();
+
+// Spawna o cão companheiro ao carregar o jogo
+dogs.spawnCompanion('golden');
 
 // ============================================================
 // CÂMERA ORBITAL EM 3ª PESSOA
@@ -98,7 +99,7 @@ class OrbitCameraRig {
     this.minPitch = THREE.MathUtils.degToRad(2);
     this.maxPitch = THREE.MathUtils.degToRad(85);
     
-    this.minDistance = 0.8; // Permite aproximação até o rosto
+    this.minDistance = 0.8;
     this.maxDistance = 8.0;
 
     this.yawSpeed = 0.006;
@@ -182,12 +183,10 @@ const orbitCamera = new OrbitCameraRig(camera, renderer.domElement);
 const clock = new THREE.Clock();
 
 function animate() {
-  dogs.update(delta);
-  minimap.update(orbitCamera.yaw);
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
-  gameModeManager.update(delta, elapsed);
+
   physics.step(delta);
 
   const { forward, right, isRunning } = input.getMovement();
@@ -199,7 +198,10 @@ function animate() {
   world.update(delta);
   animals.update(delta, elapsed);
   collectibles.update(player.group.position, elapsed);
-  dragon.update(delta, elapsed); // Chamada correta do Dragão dentro do loop
+  dragon.update(delta, elapsed);
+  dogs.update(delta);
+  gameModeManager.update(delta, elapsed);
+  minimap.update(orbitCamera.yaw);
 
   orbitCamera.update(player.group.position, delta);
 
@@ -228,4 +230,3 @@ window.triggerAnim = (animName) => {
     player.playTrigger(animName);
   }
 };
-//animate()
