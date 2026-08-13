@@ -7,7 +7,15 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Container de Placar e Mensagem de Memórias -->
     <div id="ui-container">
+        <!-- Radar Minimapa GTA e Placar de Dinheiro -->
+    <div id="gta-hud">
+        <div id="minimap-container">
+            <canvas id="minimap-canvas" width="110" height="110"></canvas>
+        </div>
+        <div id="money-display">$0000000</div>
+    </div>
         <div id="score">Memórias: 0 / 5</div>
         <div id="message-box" class="hidden">
             <p id="message-text">Encontrou uma lembrança!</p>
@@ -15,32 +23,50 @@
         </div>
     </div>
 
-    <div id="debug-panel" class="hidden"></div>
+    <!-- HUD do Parkour -->
+    <div id="parkour-hud" class="hidden">
+        ⏱️ Tempo: <span id="pk-timer">00:00.00</span> | 📍 <span id="pk-progress">0 / 5</span><br>
+        🏆 Recorde: <span id="pk-best">--</span>
+    </div>
 
+    <!-- HUD do Domínio de Altares -->
+    <div id="cp-hud" class="hidden">
+        🔵 Você: <span id="cp-score-player">0</span> / 1000 | 🔴 Rival: <span id="cp-score-rival">0</span><br>
+        🏆 Vitórias: <span id="cp-wins">0</span>
+    </div>
+
+    <!-- Modal do HUB de Modos de Jogo -->
+    <div id="mode-select-modal" class="hidden">
+        <div class="modal-card">
+            <h2>✨ Escolha o Desafio ✨</h2>
+            <p>Pise no portal para alternar entre os modos do reino:</p>
+            <button class="btn-mode btn-parkour" onclick="window.selectGameMode('parkour')">🏃‍♂️ Parkour Contrarrelógio</button>
+            <button class="btn-mode btn-control" onclick="window.selectGameMode('control')">🏛️ Domínio de Altares</button>
+            <button class="btn-mode btn-free" onclick="window.selectGameMode('free')">🌿 Exploração Livre</button>
+        </div>
+    </div>
+
+    <div id="debug-panel" class="hidden"></div>
     <div id="joystick-zone"></div>
 
-    <!-- Botoeira de Ações do Celular -->
+    <!-- Botoeira de Ações -->
     <div id="actions-panel">
         <button class="btn-action" onclick="window.triggerAnim('dance')">✨ Dançar</button>
         <button class="btn-action" onclick="window.triggerAnim('victory')">🎉 Comemorar</button>
-        <button class="btn-action" onclick="window.triggerAnim('excited')">🤩 Animada</button>
-        <button class="btn-action" onclick="window.triggerAnim('idle_dwarf')">🧘 Postura Dwarf</button>
-        <button class="btn-action" onclick="window.triggerAnim('victory')">Vitoria</button>
-        <button class="btn-action" onclick="window.triggerAnim('hiphop')">Hiphop</button>
-        <button class="btn-action" onclick="window.triggerAnim('falling')">Caindo</button>
-        
     </div>
 
+    <!-- Modal da Foto de Memória -->
     <div id="photo-modal" class="hidden">
         <img id="photo-display" src="" alt="Sua foto aparecerá aqui">
         <p id="photo-caption">Coloque a foto real na pasta assets/photos e edite no código!</p>
         <button id="btn-close-photo">Guardar na Memória</button>
     </div>
 
+    <!-- Modal de Vitória do Jogo -->
     <div id="victory-modal" class="hidden">
-        <h1>🎉 Parabéns! 🎉</h1>
-        <p>Você encontrou todas as memórias!</p>
-        <button id="btn-restart">Jogar novamente</button>
+        <h1 id="victory-modal-title">🎉 Parabéns! 🎉</h1>
+        <p id="victory-modal-desc">Você concluiu o desafio!</p>
+        <button id="btn-restart" onclick="document.getElementById('victory-modal').classList.add('hidden')">Continuar Jogando</button>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>

@@ -8,14 +8,20 @@ import { Collectibles } from './world/Collectibles.js';
 import { Dragon } from './world/Dragon.js';
 import { Input } from './Input.js';
 import { DebugHelper } from './DebugHelper.js';
-
+import { GameModeManager } from './game/GameModeManager.js';
+import { Minimap } from './ui/Minimap.js';
+import { Dogs } from './world/Dogs.js';
+//animate()
 // ============================================================
 // TOGGLES DE EMERGÊNCIA — só mude se, depois de testar, o
 // movimento ainda sair invertido em algum eixo.
 // ============================================================
 const INVERT_FORWARD = false; // true se W andar para trás
 const INVERT_STRAFE = false;  // true se A/D estiverem trocados
+const dogs = new Dogs({ scene, player });
 
+// Invoca um companheiro ao iniciar (ex: 'golden')
+dogs.spawnCompanion('golden');
 // ==========================================
 // CENA, CÂMERA, RENDERER
 // ==========================================
@@ -73,7 +79,8 @@ const player = new CharacterController({
   height: CONFIG.PLAYER_HEIGHT,
   speed: CONFIG.PLAYER_SPEED,
 });
-
+const gameModeManager = new GameModeManager({ scene, player });
+const minimap = new Minimap({ player, gameModeManager });
 const input = new Input();
 
 // ============================================================
@@ -175,10 +182,12 @@ const orbitCamera = new OrbitCameraRig(camera, renderer.domElement);
 const clock = new THREE.Clock();
 
 function animate() {
+  dogs.update(delta);
+  minimap.update(orbitCamera.yaw);
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
-
+  gameModeManager.update(delta, elapsed);
   physics.step(delta);
 
   const { forward, right, isRunning } = input.getMovement();
@@ -219,3 +228,4 @@ window.triggerAnim = (animName) => {
     player.playTrigger(animName);
   }
 };
+//animate()
