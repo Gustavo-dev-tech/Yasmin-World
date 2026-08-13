@@ -1,128 +1,212 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export class Dragon {
-  constructor({ scene, center = new THREE.Vector3(0, 20, -50), radius = 30, speed = 0.8 }) {
+  constructor({ scene, physics, player }) {
     this.scene = scene;
-    this.center = center;
-    this.radius = radius;
-    this.speed = speed;
-    this.angle = 0;
+    this.physics = physics;
+    this.player = player;
+    this.loader = new GLTFLoader();
 
-    this.group = new THREE.Group();
-    this.wings = [];
+    this.model = null;
+    this.mixer = null;
+    this.actions = {};
+    this.currentAction = null;
 
-    this._buildDragon();
-    this.scene.add(this.group);
+    // Estados simplificados: 'FLYING', 'LANDED', 'CHASING'
+    this.state = 'FLYING';
+
+    // Rota de Voo
+    this.flightCenter = new THREE.Vector3(0, 11.0, -35);
+    this.flightRadius = 38;
+    this.flightSpeed = 0.45;
+    this.flightAngle = 0;
+
+    // Temporizadores de IA
+    this.landTimer = 18;
+    this.landedTimer = 0;
+    this.chaseSpeed = 5.0;
+    this.stopDistance = 4.5;
+
+    this._loadDragon();
   }
 
-  _buildDragon() {
-    const scale = 1.8;
-    this.group.scale.set(scale, scale, scale);
+  async _loadDragon() {
+    try {
+      console.log('[Dragon] Carregando "assets/models/dragon.glb"...');
+      const gltf = await this.loader.loadAsync('assets/models/dragon.glb');
+      this.model = gltf.scene;
 
-    const darkRedMat = new THREE.MeshStandardMaterial({ color: 0x8b0000, roughness: 0.5 });
-    const orangeMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.3, emissive: 0xb45309, emissiveIntensity: 0.3 });
-    const goldMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.2 });
+      this.model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(this.model);
+      const size = box.getSize(new THREE.Vector3());
 
-    // Corpo / Tronco
-    const bodyGeo = new THREE.ConeGeometry(0.9, 3.5, 6);
-    const bodyMesh = new THREE.Mesh(bodyGeo, darkRedMat);
-    bodyMesh.rotation.x = Math.PI / 2;
-    bodyMesh.castShadow = true;
-    this.group.add(bodyMesh);
+      if (size.y > 0.01) {
+        this.model.scale.setScalar(8.5 / size.y);
+      } else {
+        this.model.scale.setScalar(3.0);
+      }
 
-    // Pescoço e Cabeça
-    const neckGeo = new THREE.CylinderGeometry(0.4, 0.7, 2, 6);
-    const neckMesh = new THREE.Mesh(neckGeo, darkRedMat);
-    neckMesh.position.set(0, 0.8, 1.8);
-    neckMesh.rotation.x = -Math.PI / 4;
-    this.group.add(neckMesh);
+      // CORREÇÃO DE MATERIAL (Para não virar uma silhueta preta)
+      this.model.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.frustumCulled = false; 
 
-    const headGeo = new THREE.BoxGeometry(0.8, 0.7, 1.4);
-    const headMesh = new THREE.Mesh(headGeo, darkRedMat);
-    headMesh.position.set(0, 1.5, 2.5);
-    headMesh.castShadow = true;
-    this.group.add(headMesh);
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0x6b2b3c, // Vermelho/Vinho escuro visível
+            emissive: 0x1a0a12, // Leve brilho base para detalhar as escamas na sombra
+            roughness: 0.7,
+            metalness: 0.1,
+            side: THREE.DoubleSide
+          });
+        }
+      });
 
-    // Olhos Brilhantes
-    const eyeGeo = new THREE.SphereGeometry(0.12, 8, 8);
-    [-0.42, 0.42].forEach((ox) => {
-      const eye = new THREE.Mesh(eyeGeo, orangeMat);
-      eye.position.set(ox, 1.65, 2.8);
-      this.group.add(eye);
-    });
+      this.scene.add(this.model);
 
-    // Chifres
-    const hornGeo = new THREE.ConeGeometry(0.15, 0.9, 4);
-    [-0.3, 0.3].forEach((ox) => {
-      const horn = new THREE.Mesh(hornGeo, goldMat);
-      horn.position.set(ox, 2.1, 2.2);
-      horn.rotation.x = -Math.PI / 3;
-      this.group.add(horn);
-    });
+      if (gltf.animations && gltf.animations.length > 0) {
+        this.mixer = new THREE.AnimationMixer(this.model);
 
-    // Cauda
-    const tailGeo = new THREE.ConeGeometry(0.4, 4, 5);
-    const tailMesh = new THREE.Mesh(tailGeo, darkRedMat);
-    tailMesh.position.set(0, -0.2, -3.2);
-    tailMesh.rotation.x = -Math.PI / 2.2;
-    this.group.add(tailMesh);
+        const getClip = (name, fallbackIdx) => {
+          const found = gltf.animations.find((c) => c.name === name);
+          return found || gltf.animations[fallbackIdx] || gltf.animations[0];
+        };
 
-    // Asas Esquerda e Direita (Articuladas para Animação de Voo)
-    const wingGeo = new THREE.BufferGeometry();
-    const vertices = new Float32Array([
-      0, 0, 0,
-      3.5, 0.5, -0.8,
-      2.0, 0, -2.5,
-    ]);
-    wingGeo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-    wingGeo.computeVertexNormals();
+        // O SEGREDO: Trocamos o 'fly2' estático pelo 'up' que bate as asas intensamente!
+        this.actions['fly'] = this.mixer.clipAction(getClip('Qishilong_up', 23)); 
+        this.actions['idle'] = this.mixer.clipAction(getClip('Qishilong_down_dz', 6));
+        this.actions['walk'] = this.mixer.clipAction(getClip('Qishilong_skill05', 10)); 
+        this.actions['attack'] = this.mixer.clipAction(getClip('Qishilong_attack01', 0));
 
-    const wingMat = new THREE.MeshStandardMaterial({
-      color: 0x990000,
-      side: THREE.DoubleSide,
-      roughness: 0.6,
-    });
+        // Força loop infinito em todas as ações
+        Object.values(this.actions).forEach(action => {
+          action.setLoop(THREE.LoopRepeat, Infinity);
+        });
 
-    // Asa Esquerda
-    const leftWing = new THREE.Mesh(wingGeo, wingMat);
-    leftWing.position.set(0.6, 0.2, 0.2);
-    this.group.add(leftWing);
-    this.wings.push({ mesh: leftWing, side: 1 });
+        this.playAnim('fly');
+        console.log('[Dragon] Animações principais vinculadas. Usando Qishilong_up para o voo!');
+      }
 
-    // Asa Direita
-    const rightWing = new THREE.Mesh(wingGeo, wingMat);
-    rightWing.position.set(-0.6, 0.2, 0.2);
-    rightWing.scale.x = -1; // Espelha a asa
-    this.group.add(rightWing);
-    this.wings.push({ mesh: rightWing, side: -1 });
-
-    // Luz de Fogo Fraca Sob o Dragão
-    const fireLight = new THREE.PointLight(0xff4500, 2, 25);
-    fireLight.position.set(0, -0.5, 1);
-    this.group.add(fireLight);
+    } catch (err) {
+      console.warn('[Dragon] Erro ao carregar "assets/models/dragon.glb":', err);
+    }
   }
 
-  update(delta, elapsedTime) {
-    // 1. Movimento Circular ao redor do Castelo
-    this.angle += this.speed * delta;
-    const x = this.center.x + Math.cos(this.angle) * this.radius;
-    const z = this.center.z + Math.sin(this.angle) * this.radius;
+  // TRANSIÇÃO SUAVE DE ANIMAÇÕES (Crossfade)
+  playAnim(animName) {
+    if (!this.actions[animName] || this.currentAction === animName) return;
+
+    const nextAction = this.actions[animName];
     
-    // Suave oscilação de altitude (subir e descer ao voar)
-    const y = this.center.y + Math.sin(elapsedTime * 1.5) * 2.5;
+    if (this.currentAction && this.actions[this.currentAction]) {
+      this.actions[this.currentAction].fadeOut(0.4); // Suaviza a saída da animação antiga
+    }
 
-    this.group.position.set(x, y, z);
+    nextAction.reset();
+    nextAction.setEffectiveWeight(1.0);
+    nextAction.fadeIn(0.4); // Suaviza a entrada da nova
+    nextAction.play();
 
-    // 2. Aponta o dragão na direção da sua trajetória
-    this.group.rotation.y = -this.angle;
+    this.currentAction = animName;
+  }
 
-    // 3. Inclinação lateral ao fazer a curva (Banking Angle)
-    this.group.rotation.z = Math.sin(elapsedTime * 1.5) * 0.15 - 0.2;
+  update(delta, player) {
+    if (!this.model) return;
 
-    // 4. Batimento das Asas
-    const wingFlap = Math.sin(elapsedTime * 6) * 0.45;
-    this.wings.forEach((w) => {
-      w.mesh.rotation.z = wingFlap * w.side;
-    });
+    if (this.mixer) {
+      this.mixer.update(delta);
+    }
+
+    const activePlayer = player || this.player;
+    const playerPos = activePlayer?.group?.position || activePlayer?.position;
+
+    // --- ESTADO 1: VOO NO CÉU ---
+    if (this.state === 'FLYING') {
+      this.playAnim('fly'); // Agora vai bater as asas!
+
+      this.flightAngle += this.flightSpeed * delta;
+      const x = this.flightCenter.x + Math.cos(this.flightAngle) * this.flightRadius;
+      const z = this.flightCenter.z + Math.sin(this.flightAngle) * this.flightRadius;
+      const y = 11.0 + Math.sin(this.flightAngle * 2) * 1.5;
+
+      this.model.position.set(x, y, z);
+
+      const nextX = this.flightCenter.x + Math.cos(this.flightAngle + 0.1) * this.flightRadius;
+      const nextZ = this.flightCenter.z + Math.sin(this.flightAngle + 0.1) * this.flightRadius;
+      this.model.lookAt(nextX, y, nextZ);
+
+      this.landTimer -= delta;
+      if (this.landTimer <= 0 && playerPos) {
+        this._landOnGround(playerPos);
+      }
+    } 
+    // --- ESTADO 2: POUSADO NO SOLO (PARADO) ---
+    else if (this.state === 'LANDED') {
+      this.playAnim('idle');
+
+      if (playerPos) {
+        this.model.lookAt(new THREE.Vector3(playerPos.x, this.model.position.y, playerPos.z));
+        const dist = this.model.position.distanceTo(playerPos);
+        if (dist < 8.0) {
+          this.state = 'CHASING';
+          this.landedTimer = 12.0;
+        }
+      }
+
+      this.landedTimer -= delta;
+      if (this.landedTimer <= 0) {
+        this._takeOff();
+      }
+    } 
+    // --- ESTADO 3: PERSEGUIÇÃO NO SOLO ---
+    else if (this.state === 'CHASING') {
+      if (playerPos) {
+        const dragPos = this.model.position;
+        const dist = dragPos.distanceTo(playerPos);
+
+        this.model.lookAt(new THREE.Vector3(playerPos.x, dragPos.y, playerPos.z));
+
+        if (dist > this.stopDistance) {
+          this.playAnim('walk');
+
+          const dir = new THREE.Vector3().subVectors(playerPos, dragPos);
+          dir.y = 0;
+          dir.normalize();
+
+          dragPos.x += dir.x * this.chaseSpeed * delta;
+          dragPos.z += dir.z * this.chaseSpeed * delta;
+          dragPos.y = playerPos.y;
+        } else {
+          this.playAnim('attack');
+        }
+
+        this.landedTimer -= delta;
+        if (dist > 35.0 || this.landedTimer <= 0) {
+          this._takeOff();
+        }
+      }
+    }
+  }
+
+  _landOnGround(playerPos) {
+    this.state = 'LANDED';
+    this.landedTimer = 15.0;
+
+    const randomAngle = Math.random() * Math.PI * 2;
+    const randomDist = 15 + Math.random() * 10;
+
+    this.model.position.set(
+      playerPos.x + Math.cos(randomAngle) * randomDist,
+      playerPos.y,
+      playerPos.z + Math.sin(randomAngle) * randomDist
+    );
+  }
+
+  _takeOff() {
+    this.state = 'FLYING';
+    this.landTimer = 22 + Math.random() * 8;
+    this.flightCenter.set(this.model.position.x, 11.0, this.model.position.z);
   }
 }

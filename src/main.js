@@ -11,12 +11,7 @@ import { DebugHelper } from './DebugHelper.js';
 import { GameModeManager } from './game/GameModeManager.js';
 import { Minimap } from './ui/Minimap.js';
 import { Dogs } from './world/Dogs.js';
-
-// ============================================================
-// TOGGLES DE EMERGÊNCIA
-// ============================================================
-const INVERT_FORWARD = false;
-const INVERT_STRAFE = false;
+import { ForestManager } from './world/ForestManager.js';
 
 // ==========================================
 // CENA, CÂMERA, RENDERER
@@ -46,24 +41,11 @@ dirLight.shadow.bias = -0.001;
 scene.add(dirLight);
 
 // ==========================================
-// FÍSICA, MUNDO, ANIMAIS, COLECIONÁVEIS E DRAGÃO
+// FÍSICA E PLAYER
 // ==========================================
 const debug = new DebugHelper(CONFIG.DEBUG);
 const physics = new PhysicsWorld();
-const world = new World({ scene, physics });
-const animals = new Animals({ scene, obstacleMeshes: world.obstacleMeshes });
-const collectibles = new Collectibles({ scene });
 
-const dragon = new Dragon({
-  scene,
-  center: new THREE.Vector3(0, 22, -50),
-  radius: 35,
-  speed: 0.6,
-});
-
-// ==========================================
-// PLAYER, INPUT, MINIMAPA E CÃES
-// ==========================================
 const player = new CharacterController({
   scene,
   physics,
@@ -76,17 +58,26 @@ const player = new CharacterController({
   speed: CONFIG.PLAYER_SPEED,
 });
 
+// ==========================================
+// MUNDO, FLORESTA, ANIMAIS, COLECIONÁVEIS, DRAGÃO E CÃES
+// ==========================================
+const world = new World({ scene, physics });
+const forestManager = new ForestManager({ scene, physics, obstacleMeshes: world.obstacleMeshes });
+const animals = new Animals({ scene, obstacleMeshes: world.obstacleMeshes });
+const collectibles = new Collectibles({ scene });
+const dragon = new Dragon({ scene, physics, player });
+const dogs = new Dogs({ scene, player });
+
 const gameModeManager = new GameModeManager({ scene, player });
 const minimap = new Minimap({ player, gameModeManager });
-const dogs = new Dogs({ scene, player });
 const input = new Input();
 
 // Spawna o cão companheiro ao carregar o jogo
 dogs.spawnCompanion('golden');
 
-// ============================================================
+// ==========================================
 // CÂMERA ORBITAL EM 3ª PESSOA
-// ============================================================
+// ==========================================
 class OrbitCameraRig {
   constructor(camera, domElement) {
     this.camera = camera;
@@ -190,15 +181,15 @@ function animate() {
   physics.step(delta);
 
   const { forward, right, isRunning } = input.getMovement();
-  const f = INVERT_FORWARD ? -forward : forward;
-  const r = INVERT_STRAFE ? -right : right;
-  player.setInput(f, r, orbitCamera.yaw, isRunning);
+  player.setInput(forward, right, orbitCamera.yaw, isRunning);
   player.update(delta, elapsed);
 
+  // Atualizações dos sistemas do mapa
   world.update(delta);
+  forestManager.update(delta);
   animals.update(delta, elapsed);
   collectibles.update(player.group.position, elapsed);
-  dragon.update(delta, elapsed);
+  dragon.update(delta, player);
   dogs.update(delta);
   gameModeManager.update(delta, elapsed);
   minimap.update(orbitCamera.yaw);
@@ -224,7 +215,6 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Função global acessada pelos botões do index.html
 window.triggerAnim = (animName) => {
   if (player && player.ready) {
     player.playTrigger(animName);

@@ -1,35 +1,83 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export class World {
   constructor({ scene, physics }) {
     this.scene = scene;
     this.physics = physics;
     this.obstacleMeshes = [];
+    this.loader = new GLTFLoader();
 
-    this._createTerrain();
+    this._loadModularGround();
     this._createRuinsAndTowers();
-    this._createForestAndDecorations();
   }
 
-  _createTerrain() {
-    // Chão Expandido (300x300m)
+  async _loadModularGround() {
+    try {
+      console.log('[World] Carregando bloco de solo "assets/models/terrain_tile.glb"...');
+      const gltf = await this.loader.loadAsync('assets/models/terrain_tile.glb');
+      const tileModel = gltf.scene;
+
+      // Medição precisa do bloco de solo
+      tileModel.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(tileModel);
+      
+      const widthX = box.max.x - box.min.x;
+      const widthZ = box.max.z - box.min.z;
+      const topY = box.max.y; // Ponto mais alto da superfície da grama
+
+      // Subtrai 0.03m para fazer uma leve sobreposição e sumir com as linhas de emenda
+      const tileSizeX = widthX > 0.1 ? (widthX - 0.03) : 10;
+      const tileSizeZ = widthZ > 0.1 ? (widthZ - 0.03) : 10;
+
+      // Define a grade de blocos para cobrir o mapa aberto
+      const gridRadius = 6; 
+
+      for (let x = -gridRadius; x <= gridRadius; x++) {
+        for (let z = -gridRadius; z <= gridRadius; z++) {
+          const tileInstance = tileModel.clone(true);
+
+          // Rebaixa o bloco exatamente pelo valor de 'topY' para a grama ficar em Y = 0
+          tileInstance.position.set(
+            x * tileSizeX, 
+            -topY, 
+            z * tileSizeZ
+          );
+
+          tileInstance.traverse((child) => {
+            if (child.isMesh) {
+              child.receiveShadow = true;
+              child.castShadow = false;
+            }
+          });
+
+          this.scene.add(tileInstance);
+        }
+      }
+
+      // Adiciona o plano de física nivelado com a sola dos pés
+      this.physics.addGroundPlane();
+      console.log('[World] Solo alinhado com o pé dos personagens e emendas suavizadas!');
+
+    } catch (err) {
+      console.warn('[World] "terrain_tile.glb" não encontrado. Usando plano fallback.', err);
+      this._createFallbackTerrain();
+    }
+  }
+
+  _createFallbackTerrain() {
     const groundGeo = new THREE.PlaneGeometry(300, 300, 32, 32);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x4ade80,
-      roughness: 0.8,
-    });
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.8 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     this.scene.add(ground);
-
     this.physics.addGroundPlane();
   }
 
   _createRuinsAndTowers() {
     const stoneMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.6 });
 
-    // Torre de Vigia com Ameias
     const towerGeo = new THREE.CylinderGeometry(4, 4.5, 16, 12);
     const tower = new THREE.Mesh(towerGeo, stoneMat);
     tower.position.set(20, 8, -40);
@@ -40,47 +88,36 @@ export class World {
     this.physics.addStaticCylinder(4, 16, tower.position);
     this.obstacleMeshes.push(tower);
 
-    // Castelo Central Expandido
-    const castleGeo = new THREE.BoxGeometry(25, 14, 25);
-    const castle = new THREE.Mesh(castleGeo, stoneMat);
-    castle.position.set(0, 7, -120);
-    castle.castShadow = true;
-    castle.receiveShadow = true;
-    this.scene.add(castle);
-
-    this.physics.addStaticBox({ x: 25, y: 14, z: 25 }, castle.position);
-    this.obstacleMeshes.push(castle);
+    this._loadCastle(stoneMat);
   }
 
-  _createForestAndDecorations() {
-    const trunkGeo = new THREE.CylinderGeometry(0.4, 0.6, 4, 8);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f });
-    const leavesGeo = new THREE.ConeGeometry(2.5, 6, 8);
-    const leavesMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.5 });
+  async _loadCastle(fallbackMat) {
+    try {
+      const gltf = await this.loader.loadAsync('assets/models/castle.glb');
+      const castle = gltf.scene;
+      castle.position.set(0, 0, -120);
+      castle.scale.setScalar(1.5);
 
-    // Floresta Densa Espalhada
-    for (let i = 0; i < 60; i++) {
-      const x = (Math.random() - 0.5) * 260;
-      const z = (Math.random() - 0.5) * 260;
+      castle.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
 
-      if (Math.abs(x) < 15 && Math.abs(z) < 15) continue; // Abre espaço no spawn
+      this.scene.add(castle);
+      this.physics.addStaticBox({ x: 25, y: 14, z: 25 }, new THREE.Vector3(0, 7, -120));
+      this.obstacleMeshes.push(castle);
+    } catch (e) {
+      const castleGeo = new THREE.BoxGeometry(25, 14, 25);
+      const castle = new THREE.Mesh(castleGeo, fallbackMat);
+      castle.position.set(0, 7, -120);
+      castle.castShadow = true;
+      castle.receiveShadow = true;
+      this.scene.add(castle);
 
-      const group = new THREE.Group();
-      const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-      trunk.position.y = 2;
-      trunk.castShadow = true;
-      group.add(trunk);
-
-      const leaves = new THREE.Mesh(leavesGeo, leavesMat);
-      leaves.position.y = 6;
-      leaves.castShadow = true;
-      group.add(leaves);
-
-      group.position.set(x, 0, z);
-      this.scene.add(group);
-
-      this.physics.addStaticCylinder(0.5, 4, new THREE.Vector3(x, 2, z));
-      this.obstacleMeshes.push(group);
+      this.physics.addStaticBox({ x: 25, y: 14, z: 25 }, castle.position);
+      this.obstacleMeshes.push(castle);
     }
   }
 
