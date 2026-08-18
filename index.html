@@ -7,15 +7,62 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Container de Placar e Mensagem de Memórias -->
-    <div id="ui-container">
-        <!-- Radar Minimapa GTA e Placar de Dinheiro -->
-    <div id="gta-hud">
-        <div id="minimap-container">
-            <canvas id="minimap-canvas" width="110" height="110"></canvas>
+
+    <div id="main-menu" class="menu-overlay">
+        <div class="menu-card">
+            <h1 class="game-title">REINO DE DRAGÕES</h1>
+            <p class="game-subtitle">Uma Aventura Espetacular</p>
+
+            <div class="menu-buttons">
+                <button id="btn-start" class="btn-primary">START GAME</button>
+                <button id="btn-controls" class="btn-secondary">CONTROLES</button>
+                <button id="btn-credits" class="btn-secondary">CRÉDITOS</button>
+            </div>
         </div>
-        <div id="money-display">$0000000</div>
     </div>
+
+    <div id="pause-menu" class="menu-overlay hidden">
+        <div class="menu-card">
+            <h1 class="game-title">JOGO PAUSADO</h1>
+            <p class="game-subtitle">O Reino está em espera</p>
+
+            <div class="menu-buttons">
+                <button id="btn-resume" class="btn-primary">CONTINUAR</button>
+                <button id="btn-pause-controls" class="btn-secondary">CONTROLES</button>
+                <button id="btn-main-menu" class="btn-secondary">MENU PRINCIPAL</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-controls" class="modal hidden">
+        <div class="modal-content">
+            <h2>🎮 Como Jogar</h2>
+            <ul>
+                <li><strong>W, A, S, D:</strong> Mover a personagem</li>
+                <li><strong>Shift:</strong> Correr</li>
+                <li><strong>Arraste da Tela / Mouse:</strong> Girar a câmera</li>
+                <li><strong>Scroll do Mouse:</strong> Zoom da câmera</li>
+            </ul>
+            <button id="btn-close-controls" class="btn-secondary">Voltar</button>
+        </div>
+    </div>
+
+    <div id="modal-credits" class="modal hidden">
+        <div class="modal-content">
+            <h2>📜 Créditos</h2>
+            <p>Desenvolvido com Three.js & Cannon-es</p>
+            <p>Modelos 3D & Animações do Reino</p>
+            <button id="btn-close-credits" class="btn-secondary">Voltar</button>
+        </div>
+    </div>
+
+    <div id="ui-container">
+        <div id="gta-hud">
+            <div id="minimap-container">
+                <canvas id="minimap-canvas" width="110" height="110"></canvas>
+            </div>
+            <div id="money-display">$0000000</div>
+        </div>
         <div id="score">Memórias: 0 / 5</div>
         <div id="message-box" class="hidden">
             <p id="message-text">Encontrou uma lembrança!</p>
@@ -23,19 +70,16 @@
         </div>
     </div>
 
-    <!-- HUD do Parkour -->
     <div id="parkour-hud" class="hidden">
         ⏱️ Tempo: <span id="pk-timer">00:00.00</span> | 📍 <span id="pk-progress">0 / 5</span><br>
         🏆 Recorde: <span id="pk-best">--</span>
     </div>
 
-    <!-- HUD do Domínio de Altares -->
     <div id="cp-hud" class="hidden">
         🔵 Você: <span id="cp-score-player">0</span> / 1000 | 🔴 Rival: <span id="cp-score-rival">0</span><br>
         🏆 Vitórias: <span id="cp-wins">0</span>
     </div>
 
-    <!-- Modal do HUB de Modos de Jogo -->
     <div id="mode-select-modal" class="hidden">
         <div class="modal-card">
             <h2>✨ Escolha o Desafio ✨</h2>
@@ -49,20 +93,19 @@
     <div id="debug-panel" class="hidden"></div>
     <div id="joystick-zone"></div>
 
-    <!-- Botoeira de Ações -->
     <div id="actions-panel">
+        <button id="btn-mount" class="btn-action hidden">🐉 Montar</button>
+        <button id="btn-pause" class="btn-action">⏸️ Pause</button>
         <button class="btn-action" onclick="window.triggerAnim('dance')">✨ Dançar</button>
         <button class="btn-action" onclick="window.triggerAnim('victory')">🎉 Comemorar</button>
     </div>
 
-    <!-- Modal da Foto de Memória -->
     <div id="photo-modal" class="hidden">
         <img id="photo-display" src="" alt="Sua foto aparecerá aqui">
         <p id="photo-caption">Coloque a foto real na pasta assets/photos e edite no código!</p>
         <button id="btn-close-photo">Guardar na Memória</button>
     </div>
 
-    <!-- Modal de Vitória do Jogo -->
     <div id="victory-modal" class="hidden">
         <h1 id="victory-modal-title">🎉 Parabéns! 🎉</h1>
         <p id="victory-modal-desc">Você concluiu o desafio!</p>

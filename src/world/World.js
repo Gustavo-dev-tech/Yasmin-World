@@ -26,18 +26,16 @@ export class World {
       const widthZ = box.max.z - box.min.z;
       const topY = box.max.y; // Ponto mais alto da superfície da grama
 
-      // Subtrai 0.03m para fazer uma leve sobreposição e sumir com as linhas de emenda
       const tileSizeX = widthX > 0.1 ? (widthX - 0.03) : 10;
       const tileSizeZ = widthZ > 0.1 ? (widthZ - 0.03) : 10;
 
-      // Define a grade de blocos para cobrir o mapa aberto
-      const gridRadius = 6; 
+      // EXPANSÃO DO MAPA: Aumentado para 12 (Cria um grid de 25x25 = 625 blocos)
+      const gridRadius = 15; 
 
       for (let x = -gridRadius; x <= gridRadius; x++) {
         for (let z = -gridRadius; z <= gridRadius; z++) {
           const tileInstance = tileModel.clone(true);
 
-          // Rebaixa o bloco exatamente pelo valor de 'topY' para a grama ficar em Y = 0
           tileInstance.position.set(
             x * tileSizeX, 
             -topY, 
@@ -55,9 +53,8 @@ export class World {
         }
       }
 
-      // Adiciona o plano de física nivelado com a sola dos pés
       this.physics.addGroundPlane();
-      console.log('[World] Solo alinhado com o pé dos personagens e emendas suavizadas!');
+      console.log('[World] Mapa expandido com sucesso!');
 
     } catch (err) {
       console.warn('[World] "terrain_tile.glb" não encontrado. Usando plano fallback.', err);
@@ -66,7 +63,7 @@ export class World {
   }
 
   _createFallbackTerrain() {
-    const groundGeo = new THREE.PlaneGeometry(300, 300, 32, 32);
+    const groundGeo = new THREE.PlaneGeometry(500, 500, 32, 32);
     const groundMat = new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.8 });
     const ground = new THREE.Mesh(groundGeo, groundMat);
     ground.rotation.x = -Math.PI / 2;
@@ -122,4 +119,6 @@ export class World {
   }
 
   update(delta) {}
+  
 }
+//update(delta, player)

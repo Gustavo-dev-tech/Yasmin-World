@@ -12,13 +12,15 @@ import { GameModeManager } from './game/GameModeManager.js';
 import { Minimap } from './ui/Minimap.js';
 import { Dogs } from './world/Dogs.js';
 import { ForestManager } from './world/ForestManager.js';
+import { MainMenu } from './ui/MainMenu.js';
+import { PauseMenu } from './ui/PauseMenu.js';
 
 // ==========================================
 // CENA, CÂMERA, RENDERER
 // ==========================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#87CEEB');
-scene.fog = new THREE.Fog('#feb47b', 15, 85);
+scene.fog = new THREE.Fog('#feb47b', 15, 120);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -59,7 +61,7 @@ const player = new CharacterController({
 });
 
 // ==========================================
-// MUNDO, FLORESTA, ANIMAIS, COLECIONÁVEIS, DRAGÃO E CÃES
+// SISTEMAS DE ENTIDADES DO MUNDO
 // ==========================================
 const world = new World({ scene, physics });
 const forestManager = new ForestManager({ scene, physics, obstacleMeshes: world.obstacleMeshes });
@@ -72,11 +74,10 @@ const gameModeManager = new GameModeManager({ scene, player });
 const minimap = new Minimap({ player, gameModeManager });
 const input = new Input();
 
-// Spawna o cão companheiro ao carregar o jogo
 dogs.spawnCompanion('golden');
 
 // ==========================================
-// CÂMERA ORBITAL EM 3ª PESSOA
+// CÂMERA ORBITAL PADRÃO (DISTÂNCIA MÁXIMA = 48.0)
 // ==========================================
 class OrbitCameraRig {
   constructor(camera, domElement) {
@@ -85,13 +86,13 @@ class OrbitCameraRig {
 
     this.yaw = 0;
     this.pitch = THREE.MathUtils.degToRad(20);
-    this.distance = 4.5;
+    this.distance = 8.0;
 
     this.minPitch = THREE.MathUtils.degToRad(2);
     this.maxPitch = THREE.MathUtils.degToRad(85);
     
-    this.minDistance = 0.8;
-    this.maxDistance = 8.0;
+    this.minDistance = 1.0;
+    this.maxDistance = 48.0;
 
     this.yawSpeed = 0.006;
     this.pitchSpeed = 0.006;
@@ -141,7 +142,7 @@ class OrbitCameraRig {
 
     this.domElement.addEventListener('wheel', (e) => {
       this.distance = THREE.MathUtils.clamp(
-        this.distance + e.deltaY * 0.004,
+        this.distance + e.deltaY * 0.012,
         this.minDistance,
         this.maxDistance
       );
@@ -150,7 +151,7 @@ class OrbitCameraRig {
 
   update(playerPosition, delta) {
     const zoomFactor = 1 - THREE.MathUtils.clamp((this.distance - this.minDistance) / (this.maxDistance - this.minDistance), 0, 1);
-    const targetHeight = THREE.MathUtils.lerp(1.2, 1.55, zoomFactor);
+    const targetHeight = THREE.MathUtils.lerp(1.2, 1.8, zoomFactor);
 
     const focusPoint = playerPosition.clone().add(new THREE.Vector3(0, targetHeight, 0));
     const lerpAlpha = 1 - Math.pow(0.001, delta);
@@ -167,36 +168,130 @@ class OrbitCameraRig {
 }
 
 const orbitCamera = new OrbitCameraRig(camera, renderer.domElement);
-
-// ==========================================
-// LOOP PRINCIPAL
-// ==========================================
 const clock = new THREE.Clock();
 
+const uiContainer = document.getElementById('ui-container');
+const actionsPanel = document.getElementById('actions-panel');
+const modalControls = document.getElementById('modal-controls');
+
+if (uiContainer) uiContainer.classList.add('hidden');
+if (actionsPanel) actionsPanel.classList.add('hidden');
+
+let isGameStarted = false;
+
+// BOTÃO DE MONTAR E REFERÊNCIA AOS OUTROS BOTÕES DE AÇÃO
+const btnMount = document.getElementById('btn-mount');
+if (btnMount) {
+  btnMount.addEventListener('click', () => {
+    if (dragon) {
+      dragon.toggleMount(player, dogs);
+    }
+  });
+}
+
+// MANAGER DO MENU DE PAUSE
+const pauseMenu = new PauseMenu({
+  onResume: () => {
+    console.log('[Game] Jogo Retomado');
+  },
+  onOpenControls: () => {
+    if (modalControls) modalControls.classList.remove('hidden');
+  },
+  onMainMenu: () => {
+    isGameStarted = false;
+    pauseMenu.canPause = false;
+    mainMenu.show();
+    if (uiContainer) uiContainer.classList.add('hidden');
+    if (actionsPanel) actionsPanel.classList.add('hidden');
+  }
+});
+
+// MANAGER DO MENU PRINCIPAL
+const mainMenu = new MainMenu({
+  onStartGame: () => {
+    isGameStarted = true;
+    pauseMenu.canPause = true;
+    
+    if (uiContainer) uiContainer.classList.remove('hidden');
+    if (actionsPanel) actionsPanel.classList.remove('hidden');
+    
+    console.log('[Game] Jogo Iniciado!');
+  }
+});
+
+// ==========================================
+// LOOP DE EXECUÇÃO DO JOGO
+// ==========================================
 function animate() {
   requestAnimationFrame(animate);
+  
   const delta = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
 
-  physics.step(delta);
+  if (isGameStarted && !pauseMenu.isPaused) {
+    physics.step(delta);
 
-  const { forward, right, isRunning } = input.getMovement();
-  player.setInput(forward, right, orbitCamera.yaw, isRunning);
-  player.update(delta, elapsed);
+    // CONTROLE DE VISIBILIDADE DO BOTÃO DE MONTAR E OCULTAÇÃO DE BOTÕES DE ANIMAÇÃO
+    if (dragon && dragon.isLoaded) {
+      const dist = player.group.position.distanceTo(dragon.group.position);
+      const actionBtns = actionsPanel ? actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-pause)') : [];
 
-  // Atualizações dos sistemas do mapa
-  world.update(delta);
-  forestManager.update(delta);
-  animals.update(delta, elapsed);
-  collectibles.update(player.group.position, elapsed);
-  dragon.update(delta, player);
-  dogs.update(delta);
-  gameModeManager.update(delta, elapsed);
-  minimap.update(orbitCamera.yaw);
+      if (dragon.isMounted) {
+        if (btnMount) {
+          btnMount.classList.remove('hidden');
+          btnMount.innerText = '🛑 Desmontar';
+        }
+        // Oculta os botões "Dançar" e "Comemorar" durante a pilotagem
+        actionBtns.forEach(btn => btn.classList.add('hidden'));
+      } else {
+        if (btnMount) {
+          if (dist <= 10.0) {
+            btnMount.classList.remove('hidden');
+            btnMount.innerText = '🐉 Montar';
+          } else {
+            btnMount.classList.add('hidden');
+          }
+        }
+        // Exibe os botões de ação normalmente fora do dragão
+        actionBtns.forEach(btn => btn.classList.remove('hidden'));
+      }
+    }
 
-  orbitCamera.update(player.group.position, delta);
+    if (dragon && dragon.isMounted) {
+      dragon.update(delta, player, input, orbitCamera.yaw, dogs);
+    } else {
+      const { forward, right, isRunning } = input.getMovement();
+      player.setInput(forward, right, orbitCamera.yaw, isRunning);
+      player.update(delta, elapsed);
 
-  if (CONFIG.DEBUG) {
+      dogs.update(delta);
+      dragon.update(delta, player, input, orbitCamera.yaw, dogs);
+    }
+
+    collectibles.update(player.group.position, elapsed);
+    gameModeManager.update(delta, elapsed);
+    minimap.update(orbitCamera.yaw);
+
+    world.update(delta);
+    forestManager.update(delta);
+    animals.update(delta, elapsed);
+
+    orbitCamera.update(player.group.position, delta);
+
+  } else if (!isGameStarted) {
+    orbitCamera.yaw += 0.15 * delta;
+    
+    world.update(delta);
+    forestManager.update(delta);
+    animals.update(delta, elapsed);
+    dragon.update(delta, player, input, orbitCamera.yaw, dogs);
+    
+    orbitCamera.update(player.group.position, delta);
+  }
+
+  // Debug Ativo
+  if (CONFIG.DEBUG && isGameStarted && !pauseMenu.isPaused) {
+    const { forward, right } = input.getMovement();
     debug.update(
       `forward: ${forward.toFixed(2)} | right: ${right.toFixed(2)}\n` +
       `pos: (${player.group.position.x.toFixed(1)}, ${player.group.position.z.toFixed(1)})\n` +
@@ -207,6 +302,7 @@ function animate() {
 
   renderer.render(scene, camera);
 }
+
 animate();
 
 window.addEventListener('resize', () => {
@@ -215,8 +311,10 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// DESABILITA DISPARO DE ANIMAÇÕES TERRESTRES ENQUANTO MONTADO
 window.triggerAnim = (animName) => {
-  if (player && player.ready) {
+  if (dragon && dragon.isMounted) return; // Bloqueia dança/vitória ao voar
+  if (player && player.ready && !pauseMenu.isPaused) {
     player.playTrigger(animName);
   }
 };

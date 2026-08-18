@@ -1,212 +1,398 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import * as CANNON from 'cannon-es';
 
 export class Dragon {
   constructor({ scene, physics, player }) {
     this.scene = scene;
     this.physics = physics;
     this.player = player;
-    this.loader = new GLTFLoader();
 
-    this.model = null;
+    this.group = new THREE.Group();
+    this.scene.add(this.group);
+
     this.mixer = null;
     this.actions = {};
     this.currentAction = null;
 
-    // Estados simplificados: 'FLYING', 'LANDED', 'CHASING'
-    this.state = 'FLYING';
+    // Mapeamento de ossos
+    this.mountBone = null;
+    this.playerLeftLeg = null;
+    this.playerRightLeg = null;
 
-    // Rota de Voo
-    this.flightCenter = new THREE.Vector3(0, 11.0, -35);
-    this.flightRadius = 38;
-    this.flightSpeed = 0.45;
-    this.flightAngle = 0;
+    // Animação de Montar da Personagem (montada_dragon.fbx)
+    this.mountClip = null;
+    this.mountAction = null;
 
-    // Temporizadores de IA
-    this.landTimer = 18;
-    this.landedTimer = 0;
-    this.chaseSpeed = 5.0;
-    this.stopDistance = 4.5;
+    // Configurações do Dragão Gigante (Escala 18x)
+    this.scale = 18.0;
+    this.flySpeed = 28.0;
+    this.boostSpeed = 50.0;
+    this.groundSpeed = 4.5;
+    this.rotSpeed = 2.5;
 
-    this._loadDragon();
-  }
-
-  async _loadDragon() {
-    try {
-      console.log('[Dragon] Carregando "assets/models/dragon.glb"...');
-      const gltf = await this.loader.loadAsync('assets/models/dragon.glb');
-      this.model = gltf.scene;
-
-      this.model.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(this.model);
-      const size = box.getSize(new THREE.Vector3());
-
-      if (size.y > 0.01) {
-        this.model.scale.setScalar(8.5 / size.y);
-      } else {
-        this.model.scale.setScalar(3.0);
-      }
-
-      // CORREÇÃO DE MATERIAL (Para não virar uma silhueta preta)
-      this.model.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-          child.frustumCulled = false; 
-
-          child.material = new THREE.MeshStandardMaterial({
-            color: 0x6b2b3c, // Vermelho/Vinho escuro visível
-            emissive: 0x1a0a12, // Leve brilho base para detalhar as escamas na sombra
-            roughness: 0.7,
-            metalness: 0.1,
-            side: THREE.DoubleSide
-          });
-        }
-      });
-
-      this.scene.add(this.model);
-
-      if (gltf.animations && gltf.animations.length > 0) {
-        this.mixer = new THREE.AnimationMixer(this.model);
-
-        const getClip = (name, fallbackIdx) => {
-          const found = gltf.animations.find((c) => c.name === name);
-          return found || gltf.animations[fallbackIdx] || gltf.animations[0];
-        };
-
-        // O SEGREDO: Trocamos o 'fly2' estático pelo 'up' que bate as asas intensamente!
-        this.actions['fly'] = this.mixer.clipAction(getClip('Qishilong_up', 23)); 
-        this.actions['idle'] = this.mixer.clipAction(getClip('Qishilong_down_dz', 6));
-        this.actions['walk'] = this.mixer.clipAction(getClip('Qishilong_skill05', 10)); 
-        this.actions['attack'] = this.mixer.clipAction(getClip('Qishilong_attack01', 0));
-
-        // Força loop infinito em todas as ações
-        Object.values(this.actions).forEach(action => {
-          action.setLoop(THREE.LoopRepeat, Infinity);
-        });
-
-        this.playAnim('fly');
-        console.log('[Dragon] Animações principais vinculadas. Usando Qishilong_up para o voo!');
-      }
-
-    } catch (err) {
-      console.warn('[Dragon] Erro ao carregar "assets/models/dragon.glb":', err);
-    }
-  }
-
-  // TRANSIÇÃO SUAVE DE ANIMAÇÕES (Crossfade)
-  playAnim(animName) {
-    if (!this.actions[animName] || this.currentAction === animName) return;
-
-    const nextAction = this.actions[animName];
+    // Estado do Dragão
+    this.isMounted = false;
+    this.patrolAngle = 0;
+    this.patrolRadius = 60.0;
+    this.patrolAltitude = 35.0;
     
-    if (this.currentAction && this.actions[this.currentAction]) {
-      this.actions[this.currentAction].fadeOut(0.4); // Suaviza a saída da animação antiga
-    }
+    this.debugLogTimer = 0;
 
-    nextAction.reset();
-    nextAction.setEffectiveWeight(1.0);
-    nextAction.fadeIn(0.4); // Suaviza a entrada da nova
-    nextAction.play();
-
-    this.currentAction = animName;
+    this.isLoaded = false;
+    this._loadModel();
+    this._loadMountAnimation();
   }
 
-  update(delta, player) {
-    if (!this.model) return;
+  _loadMountAnimation() {
+    const fbxLoader = new FBXLoader();
+    const tryLoad = (path) => {
+      fbxLoader.load(
+        path,
+        (fbx) => {
+          if (fbx.animations && fbx.animations.length > 0) {
+            const clip = fbx.animations[0];
 
-    if (this.mixer) {
-      this.mixer.update(delta);
-    }
+            clip.tracks.forEach((track) => {
+              const parts = track.name.split('.');
+              let boneName = parts[0];
+              const property = parts[1];
 
-    const activePlayer = player || this.player;
-    const playerPos = activePlayer?.group?.position || activePlayer?.position;
+              boneName = boneName.replace(/^.*[\\\/:]/, '');
+              boneName = boneName.replace(/^mixamorig:?/i, '').replace(/^mixamorig/i, '');
+              track.name = `${boneName}.${property}`;
+            });
 
-    // --- ESTADO 1: VOO NO CÉU ---
-    if (this.state === 'FLYING') {
-      this.playAnim('fly'); // Agora vai bater as asas!
-
-      this.flightAngle += this.flightSpeed * delta;
-      const x = this.flightCenter.x + Math.cos(this.flightAngle) * this.flightRadius;
-      const z = this.flightCenter.z + Math.sin(this.flightAngle) * this.flightRadius;
-      const y = 11.0 + Math.sin(this.flightAngle * 2) * 1.5;
-
-      this.model.position.set(x, y, z);
-
-      const nextX = this.flightCenter.x + Math.cos(this.flightAngle + 0.1) * this.flightRadius;
-      const nextZ = this.flightCenter.z + Math.sin(this.flightAngle + 0.1) * this.flightRadius;
-      this.model.lookAt(nextX, y, nextZ);
-
-      this.landTimer -= delta;
-      if (this.landTimer <= 0 && playerPos) {
-        this._landOnGround(playerPos);
-      }
-    } 
-    // --- ESTADO 2: POUSADO NO SOLO (PARADO) ---
-    else if (this.state === 'LANDED') {
-      this.playAnim('idle');
-
-      if (playerPos) {
-        this.model.lookAt(new THREE.Vector3(playerPos.x, this.model.position.y, playerPos.z));
-        const dist = this.model.position.distanceTo(playerPos);
-        if (dist < 8.0) {
-          this.state = 'CHASING';
-          this.landedTimer = 12.0;
+            this.mountClip = clip;
+            console.log('[Dragon] Animação "montada_dragon.fbx" vinculada com sucesso!');
+          }
+        },
+        undefined,
+        () => {
+          if (path.includes('models')) {
+            tryLoad('./assets/montada_dragon.fbx');
+          }
         }
-      }
-
-      this.landedTimer -= delta;
-      if (this.landedTimer <= 0) {
-        this._takeOff();
-      }
-    } 
-    // --- ESTADO 3: PERSEGUIÇÃO NO SOLO ---
-    else if (this.state === 'CHASING') {
-      if (playerPos) {
-        const dragPos = this.model.position;
-        const dist = dragPos.distanceTo(playerPos);
-
-        this.model.lookAt(new THREE.Vector3(playerPos.x, dragPos.y, playerPos.z));
-
-        if (dist > this.stopDistance) {
-          this.playAnim('walk');
-
-          const dir = new THREE.Vector3().subVectors(playerPos, dragPos);
-          dir.y = 0;
-          dir.normalize();
-
-          dragPos.x += dir.x * this.chaseSpeed * delta;
-          dragPos.z += dir.z * this.chaseSpeed * delta;
-          dragPos.y = playerPos.y;
-        } else {
-          this.playAnim('attack');
-        }
-
-        this.landedTimer -= delta;
-        if (dist > 35.0 || this.landedTimer <= 0) {
-          this._takeOff();
-        }
-      }
-    }
+      );
+    };
+    tryLoad('./assets/montada_dragon.fbx');
   }
 
-  _landOnGround(playerPos) {
-    this.state = 'LANDED';
-    this.landedTimer = 15.0;
+  _loadModel() {
+    const loader = new GLTFLoader();
+    
+    loader.load(
+      './assets/models/dragon.glb',
+      (gltf) => {
+        const model = gltf.scene;
 
-    const randomAngle = Math.random() * Math.PI * 2;
-    const randomDist = 15 + Math.random() * 10;
+        model.scale.set(this.scale, this.scale, this.scale);
+        model.position.set(0, 0, 0);
 
-    this.model.position.set(
-      playerPos.x + Math.cos(randomAngle) * randomDist,
-      playerPos.y,
-      playerPos.z + Math.sin(randomAngle) * randomDist
+        let bestBone = null;
+        let fallbackBone = null;
+
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.frustumCulled = false;
+            child.castShadow = true;
+            child.receiveShadow = true;
+
+            if (child.material) {
+              child.material.needsUpdate = true;
+              if (!child.material.map && child.material.color) {
+                child.material.color.setHex(0x8b0000);
+              } else if (child.material.color) {
+                child.material.color.setHex(0xffffff);
+              }
+            }
+          }
+
+          if (child.isBone || child.type === 'Bone') {
+            const name = child.name.toLowerCase();
+            
+            if (!name.includes('spike') && !name.includes('wing') && !name.includes('tail')) {
+                if (name.includes('spine') || name.includes('neck')) {
+                    fallbackBone = child;
+                }
+                if (name === 'spine2' || name === 'spine_2' || name === 'spine1' || name === 'neck') {
+                    bestBone = child;
+                }
+            }
+          }
+        });
+        
+        this.mountBone = bestBone || fallbackBone;
+
+        this.group.add(model);
+        this.group.position.set(0, this.patrolAltitude, 0);
+
+        if (gltf.animations && gltf.animations.length > 0) {
+          this.mixer = new THREE.AnimationMixer(model);
+          gltf.animations.forEach((clip) => {
+            const name = clip.name.toLowerCase();
+            this.actions[name] = this.mixer.clipAction(clip);
+          });
+
+          this._playBestAnimation(['fly', 'flying', 'run']);
+        }
+
+        this.isLoaded = true;
+        console.log('[Dragon] Dragão pronto! Osso de montaria ancorado em:', this.mountBone ? this.mountBone.name : 'NENHUM');
+      },
+      undefined,
+      (error) => {
+        console.warn('[Dragon] Erro ao carregar GLB:', error);
+        this._createFallbackDragon();
+      }
     );
   }
 
-  _takeOff() {
-    this.state = 'FLYING';
-    this.landTimer = 22 + Math.random() * 8;
-    this.flightCenter.set(this.model.position.x, 11.0, this.model.position.z);
+  _createFallbackDragon() {
+    const bodyGeo = new THREE.ConeGeometry(8, 20, 8);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8b0000, roughness: 0.6 });
+    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    bodyMesh.rotation.x = Math.PI / 2;
+    bodyMesh.position.y = 8;
+    bodyMesh.frustumCulled = false;
+
+    this.group.add(bodyMesh);
+    this.group.position.set(0, this.patrolAltitude, 0);
+    this.isLoaded = true;
+  }
+
+  _playBestAnimation(candidates) {
+    for (const candidate of candidates) {
+      const key = Object.keys(this.actions).find(k => k.includes(candidate));
+      if (key) {
+        this.playAnimation(key);
+        return key;
+      }
+    }
+    const firstKey = Object.keys(this.actions)[0];
+    if (firstKey) this.playAnimation(firstKey);
+    return firstKey;
+  }
+
+  playAnimation(name) {
+    if (!this.mixer || !this.actions[name]) return;
+    const newAction = this.actions[name];
+    if (this.currentAction === newAction) return;
+
+    if (this.currentAction) {
+      this.currentAction.fadeOut(0.3);
+    }
+    newAction.reset().fadeIn(0.3).play();
+    this.currentAction = newAction;
+  }
+
+  _cachePlayerLegBones() {
+    if (!this.player || !this.player.group) return;
+    if (!this.playerLeftLeg) {
+      this.playerLeftLeg = this.player.group.getObjectByName('LeftUpLeg');
+    }
+    if (!this.playerRightLeg) {
+      this.playerRightLeg = this.player.group.getObjectByName('RightUpLeg');
+    }
+  }
+
+  toggleMount(player, dogsManager) {
+    if (!this.isLoaded || !player) return;
+
+    if (this.isMounted) {
+      this.isMounted = false;
+
+      if (this.mountAction) {
+        this.mountAction.fadeOut(0.3);
+        this.mountAction = null;
+      }
+
+      const dropPos = this.group.position.clone();
+      dropPos.y = 0;
+      dropPos.x += 8.0;
+
+      player.group.position.copy(dropPos);
+
+      if (player.body) {
+        player.body.type = CANNON.Body.DYNAMIC;
+        player.body.position.copy(dropPos);
+        player.body.velocity.set(0, 0, 0);
+        player.body.wakeUp();
+      }
+
+      if (dogsManager && dogsManager.companion) {
+        dogsManager.companion.visible = true;
+        dogsManager.companion.position.copy(dropPos);
+      }
+    } else {
+      this.isMounted = true;
+
+      this.group.position.x = player.group.position.x;
+      this.group.position.z = player.group.position.z;
+      this.group.position.y = 22.0;
+
+      if (player.body) {
+        player.body.type = CANNON.Body.KINEMATIC;
+        player.body.velocity.set(0, 0, 0);
+        player.body.sleep();
+      }
+
+      if (dogsManager && dogsManager.companion) {
+        dogsManager.companion.visible = false;
+      }
+
+      this._cachePlayerLegBones();
+
+      if (this.mountClip && player.mixer) {
+        player.mixer.stopAllAction();
+        this.mountAction = player.mixer.clipAction(this.mountClip);
+        this.mountAction.reset().fadeIn(0.2).play();
+      }
+    }
+  }
+
+  update(delta, player, input, cameraYaw, dogsManager) {
+    if (!this.isLoaded || !player || !player.group) return;
+
+    if (this.mixer) this.mixer.update(delta);
+    if (this.isMounted && player.mixer) player.mixer.update(delta);
+
+    this.group.updateMatrixWorld(true);
+
+    const dragonPos = this.group.position;
+
+    // ==========================================
+    // ESTADO 1: PILOTANDO O DRAGÃO NO AR
+    // ==========================================
+    if (this.isMounted) {
+      this._playBestAnimation(['fly', 'flying', 'run']);
+
+      this._cachePlayerLegBones();
+      if (this.playerLeftLeg && this.playerRightLeg) {
+        // Z: Abre as pernas lateralmente (Muito mais aberto agora)
+        this.playerLeftLeg.rotation.z -= 1.1;
+        this.playerRightLeg.rotation.z += 1.1;
+        
+        // X: Levanta as coxas para não entrarem na malha (Acompanha a espessura)
+        this.playerLeftLeg.rotation.x -= 0.5; 
+        this.playerRightLeg.rotation.x -= 0.5; 
+        
+        // Y: Gira o joelho/pé para fora, abraçando o formato cilíndrico do dragão
+        this.playerLeftLeg.rotation.y -= 0.3;
+        this.playerRightLeg.rotation.y += 0.3;
+      }
+
+      const { forward, right, isRunning } = input ? input.getMovement() : { forward: 0, right: 0, isRunning: false };
+      const currentSpeed = isRunning ? this.boostSpeed : this.flySpeed;
+
+      if (forward !== 0 || right !== 0) {
+        const moveDir = new THREE.Vector3();
+        
+        const camForward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw)).normalize();
+        const camRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
+
+        moveDir.addScaledVector(camForward, forward);
+        moveDir.addScaledVector(camRight, right);
+        moveDir.normalize();
+
+        const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+        let diff = targetAngle - this.group.rotation.y;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
+
+        dragonPos.addScaledVector(moveDir, currentSpeed * delta);
+      }
+
+      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, 22.0, delta * 2.0);
+
+      // ==========================================
+      // CÁLCULO DE POSIÇÃO CORRIGIDO (Sentando a personagem na pele)
+      // ==========================================
+      const offsetX = 0.0;
+      const offsetY = -0.1; // Reduzido de 0.2 para -0.1, garantindo que o quadril grude nas escamas.
+      const offsetZ = -0.2; // Mantido o alinhamento com a junta.
+
+      let riderPos = new THREE.Vector3();
+
+      if (this.mountBone) {
+        this.mountBone.getWorldPosition(riderPos);
+        
+        const localPos = this.group.worldToLocal(riderPos);
+        
+        localPos.x = offsetX; 
+        localPos.y += offsetY;
+        localPos.z += offsetZ;
+        
+        riderPos.copy(this.group.localToWorld(localPos));
+      } else {
+        const seatOffset = new THREE.Vector3(offsetX, 34.0, 7.0);
+        seatOffset.applyQuaternion(this.group.quaternion);
+        riderPos = dragonPos.clone().add(seatOffset);
+      }
+      
+      player.group.position.copy(riderPos);
+      player.group.rotation.y = this.group.rotation.y;
+
+      if (player.body) {
+        player.body.position.copy(riderPos);
+        player.body.velocity.set(0, 0, 0);
+      }
+
+      this.debugLogTimer += delta;
+      if (this.debugLogTimer >= 2.0) {
+          console.log(`[Status Montaria] Osso Animado Sólido: ${this.mountBone ? this.mountBone.name : 'NENHUM'}`);
+          console.log(`[Posição Personagem] Offsets Relativos ao Osso: Altura(Y)=${offsetY}, Frente/Trás(Z)=${offsetZ}`);
+          this.debugLogTimer = 0;
+      }
+
+      if (dogsManager && dogsManager.companion) {
+        dogsManager.companion.visible = false;
+      }
+
+      return;
+    }
+
+    // ==========================================
+    // ESTADO 2: AUTÔNOMO
+    // ==========================================
+    const playerPos = player.group.position;
+    const distXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).length();
+
+    if (distXZ <= 35.0) {
+      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, 0, delta * 2.0);
+      
+      const dirXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).normalize();
+      const targetAngle = Math.atan2(dirXZ.x, dirXZ.z);
+      let diff = targetAngle - this.group.rotation.y;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
+
+      if (distXZ > 11.5) {
+        dragonPos.addScaledVector(dirXZ, this.groundSpeed * delta);
+        this._playBestAnimation(['walk', 'run', 'trot']);
+      } else {
+        this._playBestAnimation(['idle', 'stand']);
+      }
+    } else {
+      this.patrolAngle += delta * 0.25;
+      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.patrolAltitude, delta * 1.5);
+
+      const targetX = playerPos.x + Math.cos(this.patrolAngle) * this.patrolRadius;
+      const targetZ = playerPos.z + Math.sin(this.patrolAngle) * this.patrolRadius;
+
+      const dirX = targetX - dragonPos.x;
+      const dirZ = targetZ - dragonPos.z;
+
+      const targetAngle = Math.atan2(dirX, dirZ);
+      let diff = targetAngle - this.group.rotation.y;
+      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      this.group.rotation.y += diff * Math.min(delta * 1.5, 1.0);
+
+      const flyDir = new THREE.Vector3(Math.sin(this.group.rotation.y), 0, Math.cos(this.group.rotation.y));
+      dragonPos.addScaledVector(flyDir, 14.0 * delta);
+
+      this._playBestAnimation(['fly', 'flying', 'run']);
+    }
   }
 }

@@ -81,3 +81,4 @@ export class Input {
     return { forward, right, isRunning };
   }
 }
+
