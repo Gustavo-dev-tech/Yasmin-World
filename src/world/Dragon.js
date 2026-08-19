@@ -25,18 +25,31 @@ export class Dragon {
     this.mountClip = null;
     this.mountAction = null;
 
-    // Configurações Reduzidas (Reajustadas para melhor percepção)
+    // === CONFIGURAÇÕES GLOBAIS ===
+    this.GROUND_LIMIT = 0.5; // Limite strict do chão
+
+    // === CONFIGURAÇÕES DE VOO (GTA Style + Mobile Smoothing) ===
+    // Valores de velocidade e rotação equilibrados.
+    // responsiveness baixa = inércia alta (mascara glitches de toque)
     this.scale = 18.0;
-    this.flySpeed = 18.0;   // Aumentado ligeiramente de 16.0 para melhor percepção
-    this.boostSpeed = 40.0; // Aumentado ligeiramente de 38.0
+    this.flySpeed = 18.0;   
+    this.boostSpeed = 40.0; 
     this.groundSpeed = 4.5;
-    this.rotSpeed = 1.8;    // Mantido
+    
+    // A rotação mais lenta ajuda a ignorar noise do toque falhando
+    this.rotSpeed = 1.2; 
+
+    // O pulo do gato: flightResponsiveness define a suavidade da inércia.
+    // Baixei agressivamente (de 12.0 para 1.5). Isso faz o dragão ter "massa"
+    // e deslizar. Se houver um glitch de toque voltando a zero rápido,
+    // o dragão continua deslizando na direção anterior antes de notar.
+    this.flightResponsiveness = 1.5; 
 
     // Estado do Dragão
     this.isMounted = false;
     this.patrolAngle = 0;
     this.patrolRadius = 60.0;
-    this.patrolAltitude = 45.0; // Aumentado de 35.0 para maior contraste
+    this.patrolAltitude = 45.0; 
     
     // Vetor de Inércia (Dá a sensação de peso no movimento)
     this.velocity = new THREE.Vector3(0, 0, 0);
@@ -202,12 +215,6 @@ export class Dragon {
   toggleMount(player, dogsManager) {
     if (!this.isLoaded || !player) return;
 
-    // Reseta inércia e rotações anormais ao montar/desmontar
-    this.velocity.set(0, 0, 0);
-    this.group.rotation.x = 0; 
-
-    const groundLimit = 0.5; 
-
     if (this.isMounted) {
       this.isMounted = false;
 
@@ -217,7 +224,7 @@ export class Dragon {
       }
 
       const dropPos = this.group.position.clone();
-      dropPos.y = groundLimit; // Garante que ele pouse, não fique flutuando
+      dropPos.y = this.GROUND_LIMIT; // Garante que ele pouse ao desmontar
       dropPos.x += 8.0;
 
       player.group.position.copy(dropPos);
@@ -235,11 +242,18 @@ export class Dragon {
       }
     } else {
       this.isMounted = true;
+      console.log('[Dragon] Montado no dorso do dragão (Grounded)!');
 
-      // Mantém a posição X/Z do jogador, mas ajusta a altura de montagem
+      // Reseta inércia e rotações anormais ao montar
+      this.velocity.set(0, 0, 0);
+      this.group.rotation.x = 0; 
+
+      // FIX (Goal 1): Ao montar, deita no chão onde o jogador está.
+      // O dragão autônomo já pousa quando perto, então devemos estar no chão.
       this.group.position.x = player.group.position.x;
       this.group.position.z = player.group.position.z;
-      this.group.position.y = 22.0; // Altura para o dorso da personagem
+      // Garante que monta no chão strict
+      this.group.position.y = this.GROUND_LIMIT; 
 
       if (player.body) {
         player.body.type = CANNON.Body.KINEMATIC;
@@ -272,12 +286,11 @@ export class Dragon {
     const dragonPos = this.group.position;
 
     // ==========================================
-    // ESTADO 1: PILOTANDO O DRAGÃO NO AR
+    // ESTADO 1: PILOTANDO O DRAGÃO MONTADO
     // ==========================================
     if (this.isMounted) {
-      this._playBestAnimation(['fly', 'flying', 'run']);
-
-      // Ajuste anatômico (Peso e colagem nas escamas)
+      
+      // Ajuste anatômico perfeito (Abraçando o pescoço)
       this._cachePlayerLegBones();
       if (this.playerLeftLeg && this.playerRightLeg) {
         this.playerLeftLeg.rotation.z -= 1.1;
@@ -295,7 +308,7 @@ export class Dragon {
       // SISTEMA DE VOO ESTILO GTA 5 (FOCADO EM MOBILE/ÚNICO ANALÓGICO & PC)
       // ----------------------------------------------------------------------
       
-      // Busca a câmera ativa da cena (Controlada pelo swipe/touch da tela ou mouse no PC)
+      // Busca a câmera ativa da cena (swipe/touch no mobile ou mouse no PC)
       let activeCamera = null;
       this.scene.traverse((child) => {
           if (child.isPerspectiveCamera) activeCamera = child;
@@ -315,7 +328,7 @@ export class Dragon {
           moveDir.addScaledVector(camForward, forward);
           moveDir.addScaledVector(camRightDir, right);
       } else {
-          // Fallback seguro caso a câmera não seja encontrada no primeiro frame
+          // Fallback seguro caso a câmera não seja encontrada
           const camForward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw)).normalize();
           const camRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
           moveDir.addScaledVector(camForward, forward);
@@ -326,40 +339,56 @@ export class Dragon {
         moveDir.normalize();
       }
 
-      // --- INÉRCIA (FLUIDEZ) ---
-      // Interpola a velocidade gradativamente em vez de arrancar de forma robótica
+      // ----------------------------------------------------------------------
+      // INÉRCIA REFORÇADA (Goal 2 Mitigation)
+      // Mascara glitches momentâneos do multi-touch que falha no mobile
+      // ----------------------------------------------------------------------
       const targetVelocity = moveDir.clone().multiplyScalar(currentSpeed);
-      // Fator de inércia maior para movimento montado ser muito mais responsivo no PC
-      const responsiveness = 12.0; 
-      this.velocity.lerp(targetVelocity, delta * responsiveness);
+      // Fator baixo (this.flightResponsiveness) = inércia alta/massa alta.
+      // Se o toque falhar por um frame e voltar a zero, o dragão desliza na velocidade antiga.
+      this.velocity.lerp(targetVelocity, delta * this.flightResponsiveness);
 
-      // Aplica a velocidade fisicamente no dragão
+      // Aplica a velocidade inercial fisicamente no dragão
       dragonPos.addScaledVector(this.velocity, delta);
 
-      // --- COLISÃO BÁSICA COM O CHÃO (Impede cavar a terra) ---
-      const groundLimit = 0.5; 
-      if (dragonPos.y < groundLimit) {
-          dragonPos.y = groundLimit;
-          // Zera a velocidade de descida para não acumular
+      // --- POUSO E COLISÃO COM O CHÃO Strict ---
+      // Se mergulhar até o chão ou estiver parado nele:
+      if (dragonPos.y < this.GROUND_LIMIT) {
+          dragonPos.y = this.GROUND_LIMIT;
+          
+          // Importante: Zerar a velocidade vertical negativa acumulada
           if (this.velocity.y < 0) this.velocity.y = 0; 
+          
+          // Lógica de Animação de Pouso/Decolagem:
+          // Se estiver grudado no chão strict, force animações terrestres
+          if(isRunning || Math.abs(forward) > 0.1 || Math.abs(right) > 0.1) {
+              this._playBestAnimation(['run', 'trot', 'walk']);
+          } else {
+              this._playBestAnimation(['idle', 'stand']);
+          }
+      } else {
+          // No ar: force voo
+          this._playBestAnimation(['fly', 'flying', 'run']);
       }
 
-      // --- ROTAÇÃO SUAVE (EIXO Y - ESQUERDA/DIREITA) ---
+      // --- ROTAÇÃO SUAVE ESQUERDA/DIREITA (Yaw) ---
       const flatVel = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
       if (flatVel.lengthSq() > 0.1) {
         const targetAngle = Math.atan2(flatVel.x, flatVel.z);
         let diff = targetAngle - this.group.rotation.y;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        // rotação lenta ajuda na suavidade mobile contra noise de toque
         this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
       }
 
-      // --- INCLINAÇÃO DINÂMICA (EIXO X - MERGULHO/SUBIDA) ---
-      // Se ele ganha altura (voando pra cima), empina o corpo. Se afunda, embica o focinho.
+      // --- INCLINAÇÃO MERGULHO/SUBIDA (Pitch) ---
+      // Se ganha altura, empina o corpo; se mergulha, embica o focinho.
       let targetPitch = 0;
       const speed = this.velocity.length();
       if (speed > 0.5) {
           targetPitch = Math.asin(this.velocity.y / speed); 
       }
+      // Inclinação também suavizada LERP
       this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, targetPitch, delta * 2.5);
 
       // --- CÁLCULO DE POSIÇÃO DO PERSONAGEM (Grudado no dorso) ---
@@ -406,7 +435,8 @@ export class Dragon {
     const distXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).length();
 
     if (distXZ <= 35.0) {
-      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, 0, delta * 2.0);
+      // Pousar strict no chão autônomo
+      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.GROUND_LIMIT, delta * 2.0);
       
       const dirXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).normalize();
       const targetAngle = Math.atan2(dirXZ.x, dirXZ.z);
@@ -418,11 +448,13 @@ export class Dragon {
         dragonPos.addScaledVector(dirXZ, this.groundSpeed * delta);
         this._playBestAnimation(['walk', 'run', 'trot']);
       } else {
+        // Se autônomo pousou e parou, trava Y strict
+        if(Math.abs(dragonPos.y - this.GROUND_LIMIT) < 0.1) dragonPos.y = this.GROUND_LIMIT;
         this._playBestAnimation(['idle', 'stand']);
       }
     } else {
       this.patrolAngle += delta * 0.25;
-      // Garante que a altitude de patrulha seja respeitada corretamente
+      // Garante que a altitude de patrulha seja respeitada autônomo
       dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.patrolAltitude, delta * 1.5);
 
       const targetX = playerPos.x + Math.cos(this.patrolAngle) * this.patrolRadius;
