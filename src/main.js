@@ -77,7 +77,7 @@ const input = new Input();
 dogs.spawnCompanion('golden');
 
 // ==========================================
-// CÂMERA ORBITAL (CORRIGIDA PARA VOO E MULTI-TOUCH)
+// CÂMERA ORBITAL (CORRIGIDA PARA VOO E PINCH-TO-ZOOM)
 // ==========================================
 class OrbitCameraRig {
   constructor(camera, domElement) {
@@ -88,8 +88,8 @@ class OrbitCameraRig {
     this.pitch = THREE.MathUtils.degToRad(20);
     this.distance = 8.0;
 
-    // DESTRAVADO: Agora você pode olhar para CIMA (Até -45 graus), vital para pilotar para cima
-    this.minPitch = THREE.MathUtils.degToRad(-45);
+    // Limites de Câmera
+    this.minPitch = THREE.MathUtils.degToRad(-45); // Permite olhar para os céus
     this.maxPitch = THREE.MathUtils.degToRad(85);
     
     this.minDistance = 1.0;
@@ -97,12 +97,14 @@ class OrbitCameraRig {
 
     this.yawSpeed = 0.006;
     this.pitchSpeed = 0.006;
+    this.pinchZoomSpeed = 0.05; // Sensibilidade da pinça no celular
 
     this.target = new THREE.Vector3();
     
-    // VARIÁVEIS PARA MULTI-TOUCH PERFEITO
-    this._dragging = false;
-    this._activePointerId = null;
+    // SISTEMA DE MULTI-TOUCH E PINCH-TO-ZOOM
+    this.pointers = []; // Guarda os dedos ativos na tela { id, x, y }
+    this.prevPinchDistance = null;
+    
     this._lastX = 0;
     this._lastY = 0;
 
@@ -115,46 +117,93 @@ class OrbitCameraRig {
 
   _bindEvents() {
     const onDown = (e) => {
-      // Ignora se já estiver rastreando outro dedo da câmera
-      if (this._dragging) return; 
+      // Ignora toques que caírem em cima do joystick
       if (this._isOverJoystick(e.target)) return;
       
-      this._dragging = true;
-      this._activePointerId = e.pointerId; // Trava o ID deste dedo específico
-      this._lastX = e.clientX;
-      this._lastY = e.clientY;
+      // Armazena ou atualiza o ponteiro (dedo) na nossa lista de controles
+      const existingPointer = this.pointers.find(p => p.id === e.pointerId);
+      if (!existingPointer) {
+        this.pointers.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+      }
+
+      // Se temos 1 dedo, prepara para GIRAR a câmera
+      if (this.pointers.length === 1) {
+        this._lastX = e.clientX;
+        this._lastY = e.clientY;
+      } 
+      // Se temos 2 dedos, prepara para PINÇA (calcula a distância inicial)
+      else if (this.pointers.length === 2) {
+        const dx = this.pointers[0].x - this.pointers[1].x;
+        const dy = this.pointers[0].y - this.pointers[1].y;
+        this.prevPinchDistance = Math.hypot(dx, dy);
+      }
     };
     
     const onMove = (e) => {
-      // Movimenta APENAS se for o mesmo dedo que iniciou
-      if (!this._dragging || e.pointerId !== this._activePointerId) return;
-      
-      const deltaX = e.clientX - this._lastX;
-      const deltaY = e.clientY - this._lastY;
-      this._lastX = e.clientX;
-      this._lastY = e.clientY;
+      // Procura qual dedo se mexeu e atualiza as coordenadas dele
+      const pointer = this.pointers.find(p => p.id === e.pointerId);
+      if (!pointer) return;
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
 
-      this.yaw -= deltaX * this.yawSpeed;
-      this.pitch = THREE.MathUtils.clamp(
-        this.pitch - deltaY * this.pitchSpeed,
-        this.minPitch,
-        this.maxPitch
-      );
+      // === MODO 1 DEDO: ROTACIONAR A CÂMERA ===
+      if (this.pointers.length === 1) {
+        const deltaX = e.clientX - this._lastX;
+        const deltaY = e.clientY - this._lastY;
+        this._lastX = e.clientX;
+        this._lastY = e.clientY;
+
+        this.yaw -= deltaX * this.yawSpeed;
+        this.pitch = THREE.MathUtils.clamp(
+          this.pitch - deltaY * this.pitchSpeed,
+          this.minPitch,
+          this.maxPitch
+        );
+      } 
+      // === MODO 2 DEDOS: PINCH-TO-ZOOM ===
+      else if (this.pointers.length === 2) {
+        const dx = this.pointers[0].x - this.pointers[1].x;
+        const dy = this.pointers[0].y - this.pointers[1].y;
+        const currentPinchDistance = Math.hypot(dx, dy);
+
+        if (this.prevPinchDistance !== null) {
+          // A diferença entre a distância antiga e a nova
+          // Se for negativa, os dedos afastaram (Zoom IN)
+          // Se for positiva, os dedos juntaram (Zoom OUT)
+          const pinchDelta = this.prevPinchDistance - currentPinchDistance;
+          
+          this.distance = THREE.MathUtils.clamp(
+            this.distance + pinchDelta * this.pinchZoomSpeed,
+            this.minDistance,
+            this.maxDistance
+          );
+        }
+        this.prevPinchDistance = currentPinchDistance;
+      }
     };
     
     const onUp = (e) => {
-      // Reseta APENAS se o dedo solto for o da câmera
-      if (e.pointerId === this._activePointerId) {
-        this._dragging = false;
-        this._activePointerId = null;
+      // Remove o dedo que saiu da tela da nossa lista
+      this.pointers = this.pointers.filter(p => p.id !== e.pointerId);
+
+      // Se o jogador estava com 2 dedos (pinça) e soltou um, 
+      // o dedo que sobrou volta a rotacionar. Precisamos resetar a posição inicial 
+      // desse dedo para a câmera não dar um pulo brusco.
+      if (this.pointers.length === 1) {
+        this._lastX = this.pointers[0].x;
+        this._lastY = this.pointers[0].y;
+      } else if (this.pointers.length < 2) {
+        this.prevPinchDistance = null; // Reseta a pinça
       }
     };
 
+    // Usando PointerEvents, funciona para toque duplo no celular e clique de mouse
     this.domElement.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
 
+    // Zoom com o Scroll do Mouse (Mantido para testes no PC)
     this.domElement.addEventListener('wheel', (e) => {
       this.distance = THREE.MathUtils.clamp(
         this.distance + e.deltaY * 0.012,
@@ -176,7 +225,7 @@ class OrbitCameraRig {
     const x = this.target.x + horizontalR * Math.sin(this.yaw);
     const z = this.target.z + horizontalR * Math.cos(this.yaw);
     
-    // IMPEDE A CÂMERA DE ATRAVESSAR O CHÃO, mesmo ao olhar para cima
+    // IMPEDE A CÂMERA DE ATRAVESSAR O CHÃO
     let y = this.target.y + this.distance * Math.sin(this.pitch);
     y = Math.max(0.5, y); 
 
