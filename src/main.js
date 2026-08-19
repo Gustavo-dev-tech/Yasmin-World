@@ -77,7 +77,7 @@ const input = new Input();
 dogs.spawnCompanion('golden');
 
 // ==========================================
-// CÂMERA ORBITAL PADRÃO (DISTÂNCIA MÁXIMA = 48.0)
+// CÂMERA ORBITAL (CORRIGIDA PARA VOO E MULTI-TOUCH)
 // ==========================================
 class OrbitCameraRig {
   constructor(camera, domElement) {
@@ -88,7 +88,8 @@ class OrbitCameraRig {
     this.pitch = THREE.MathUtils.degToRad(20);
     this.distance = 8.0;
 
-    this.minPitch = THREE.MathUtils.degToRad(2);
+    // DESTRAVADO: Agora você pode olhar para CIMA (Até -45 graus), vital para pilotar para cima
+    this.minPitch = THREE.MathUtils.degToRad(-45);
     this.maxPitch = THREE.MathUtils.degToRad(85);
     
     this.minDistance = 1.0;
@@ -98,7 +99,10 @@ class OrbitCameraRig {
     this.pitchSpeed = 0.006;
 
     this.target = new THREE.Vector3();
+    
+    // VARIÁVEIS PARA MULTI-TOUCH PERFEITO
     this._dragging = false;
+    this._activePointerId = null;
     this._lastX = 0;
     this._lastY = 0;
 
@@ -110,18 +114,25 @@ class OrbitCameraRig {
   }
 
   _bindEvents() {
-    const onDown = (x, y, target) => {
-      if (this._isOverJoystick(target)) return;
+    const onDown = (e) => {
+      // Ignora se já estiver rastreando outro dedo da câmera
+      if (this._dragging) return; 
+      if (this._isOverJoystick(e.target)) return;
+      
       this._dragging = true;
-      this._lastX = x;
-      this._lastY = y;
+      this._activePointerId = e.pointerId; // Trava o ID deste dedo específico
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
     };
-    const onMove = (x, y) => {
-      if (!this._dragging) return;
-      const deltaX = x - this._lastX;
-      const deltaY = y - this._lastY;
-      this._lastX = x;
-      this._lastY = y;
+    
+    const onMove = (e) => {
+      // Movimenta APENAS se for o mesmo dedo que iniciou
+      if (!this._dragging || e.pointerId !== this._activePointerId) return;
+      
+      const deltaX = e.clientX - this._lastX;
+      const deltaY = e.clientY - this._lastY;
+      this._lastX = e.clientX;
+      this._lastY = e.clientY;
 
       this.yaw -= deltaX * this.yawSpeed;
       this.pitch = THREE.MathUtils.clamp(
@@ -130,13 +141,17 @@ class OrbitCameraRig {
         this.maxPitch
       );
     };
-    const onUp = () => { this._dragging = false; };
+    
+    const onUp = (e) => {
+      // Reseta APENAS se o dedo solto for o da câmera
+      if (e.pointerId === this._activePointerId) {
+        this._dragging = false;
+        this._activePointerId = null;
+      }
+    };
 
-    this.domElement.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      onDown(e.clientX, e.clientY, e.target);
-    });
-    window.addEventListener('pointermove', (e) => onMove(e.clientX, e.clientY));
+    this.domElement.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
 
@@ -159,8 +174,11 @@ class OrbitCameraRig {
 
     const horizontalR = this.distance * Math.cos(this.pitch);
     const x = this.target.x + horizontalR * Math.sin(this.yaw);
-    const y = this.target.y + this.distance * Math.sin(this.pitch);
     const z = this.target.z + horizontalR * Math.cos(this.yaw);
+    
+    // IMPEDE A CÂMERA DE ATRAVESSAR O CHÃO, mesmo ao olhar para cima
+    let y = this.target.y + this.distance * Math.sin(this.pitch);
+    y = Math.max(0.5, y); 
 
     this.camera.position.set(x, y, z);
     this.camera.lookAt(this.target);
@@ -179,7 +197,6 @@ if (actionsPanel) actionsPanel.classList.add('hidden');
 
 let isGameStarted = false;
 
-// BOTÃO DE MONTAR E REFERÊNCIA AOS OUTROS BOTÕES DE AÇÃO
 const btnMount = document.getElementById('btn-mount');
 if (btnMount) {
   btnMount.addEventListener('click', () => {
@@ -189,7 +206,6 @@ if (btnMount) {
   });
 }
 
-// MANAGER DO MENU DE PAUSE
 const pauseMenu = new PauseMenu({
   onResume: () => {
     console.log('[Game] Jogo Retomado');
@@ -206,7 +222,6 @@ const pauseMenu = new PauseMenu({
   }
 });
 
-// MANAGER DO MENU PRINCIPAL
 const mainMenu = new MainMenu({
   onStartGame: () => {
     isGameStarted = true;
@@ -231,7 +246,6 @@ function animate() {
   if (isGameStarted && !pauseMenu.isPaused) {
     physics.step(delta);
 
-    // CONTROLE DE VISIBILIDADE DO BOTÃO DE MONTAR E OCULTAÇÃO DE BOTÕES DE ANIMAÇÃO
     if (dragon && dragon.isLoaded) {
       const dist = player.group.position.distanceTo(dragon.group.position);
       const actionBtns = actionsPanel ? actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-pause)') : [];
@@ -241,7 +255,6 @@ function animate() {
           btnMount.classList.remove('hidden');
           btnMount.innerText = '🛑 Desmontar';
         }
-        // Oculta os botões "Dançar" e "Comemorar" durante a pilotagem
         actionBtns.forEach(btn => btn.classList.add('hidden'));
       } else {
         if (btnMount) {
@@ -252,7 +265,6 @@ function animate() {
             btnMount.classList.add('hidden');
           }
         }
-        // Exibe os botões de ação normalmente fora do dragão
         actionBtns.forEach(btn => btn.classList.remove('hidden'));
       }
     }
@@ -289,7 +301,6 @@ function animate() {
     orbitCamera.update(player.group.position, delta);
   }
 
-  // Debug Ativo
   if (CONFIG.DEBUG && isGameStarted && !pauseMenu.isPaused) {
     const { forward, right } = input.getMovement();
     debug.update(
@@ -311,10 +322,11 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// DESABILITA DISPARO DE ANIMAÇÕES TERRESTRES ENQUANTO MONTADO
 window.triggerAnim = (animName) => {
-  if (dragon && dragon.isMounted) return; // Bloqueia dança/vitória ao voar
+  if (dragon && dragon.isMounted) return; 
   if (player && player.ready && !pauseMenu.isPaused) {
     player.playTrigger(animName);
   }
 };
+
+// Câmera
