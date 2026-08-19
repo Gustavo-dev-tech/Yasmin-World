@@ -29,7 +29,7 @@ export class World {
       const tileSizeX = widthX > 0.1 ? (widthX - 0.03) : 10;
       const tileSizeZ = widthZ > 0.1 ? (widthZ - 0.03) : 10;
 
-      // EXPANSÃO DO MAPA: Aumentado para 12 (Cria um grid de 25x25 = 625 blocos)
+      // EXPANSÃO DO MAPA: Aumentado para 15 (Cria um grid expandido)
       const gridRadius = 15; 
 
       for (let x = -gridRadius; x <= gridRadius; x++) {
@@ -75,6 +75,7 @@ export class World {
   _createRuinsAndTowers() {
     const stoneMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.6 });
 
+    // Torre genérica de obstáculo mantida
     const towerGeo = new THREE.CylinderGeometry(4, 4.5, 16, 12);
     const tower = new THREE.Mesh(towerGeo, stoneMat);
     tower.position.set(20, 8, -40);
@@ -84,41 +85,8 @@ export class World {
 
     this.physics.addStaticCylinder(4, 16, tower.position);
     this.obstacleMeshes.push(tower);
-
-    this._loadCastle(stoneMat);
-  }
-
-  async _loadCastle(fallbackMat) {
-    try {
-      const gltf = await this.loader.loadAsync('assets/models/castle.glb');
-      const castle = gltf.scene;
-      castle.position.set(0, 0, -120);
-      castle.scale.setScalar(1.5);
-
-      castle.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-
-      this.scene.add(castle);
-      this.physics.addStaticBox({ x: 25, y: 14, z: 25 }, new THREE.Vector3(0, 7, -120));
-      this.obstacleMeshes.push(castle);
-    } catch (e) {
-      const castleGeo = new THREE.BoxGeometry(25, 14, 25);
-      const castle = new THREE.Mesh(castleGeo, fallbackMat);
-      castle.position.set(0, 7, -120);
-      castle.castShadow = true;
-      castle.receiveShadow = true;
-      this.scene.add(castle);
-
-      this.physics.addStaticBox({ x: 25, y: 14, z: 25 }, castle.position);
-      this.obstacleMeshes.push(castle);
-    }
   }
 
   update(delta) {}
   
 }
-//update(delta, player)

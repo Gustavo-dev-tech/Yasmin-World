@@ -29,7 +29,7 @@ export class CharacterController {
     position = new THREE.Vector3(),
     radius = 0.48,
     height = 1.75,
-    speed = 4.5,
+    speed = 90.0, // <-- VELOCIDADE DOBRADA AQUI!
   }) {
     this.scene = scene;
     this.physics = physics;
@@ -38,7 +38,7 @@ export class CharacterController {
     
     this.speed = speed;
     this.baseSpeed = speed;
-    this.runSpeed = speed * 1.8;
+    this.runSpeed = speed * 1.8; // A corrida será 1.8x mais rápida que a caminhada nova
 
     this.group = new THREE.Group();
     this.group.position.copy(position);
@@ -78,18 +78,15 @@ export class CharacterController {
       const relativeVelocity = contact.getImpactVelocityAlongNormal();
 
       if (relativeVelocity > 2.0 && this.actions['falling']) {
-        // Direção oposta ao movimento atual para o recuo
         const recoilDir = this.velocity.clone().negate().normalize();
         if (recoilDir.lengthSq() < 0.1) {
           recoilDir.set(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.group.rotation.y);
         }
 
-        // Empurra a cápsula física imediatamente para trás
         const recoilDistance = 0.6;
         this.body.position.x += recoilDir.x * recoilDistance;
         this.body.position.z += recoilDir.z * recoilDistance;
 
-        // Congela qualquer velocidade física residual
         this.body.velocity.set(0, 0, 0);
 
         this.triggerFall();
@@ -106,7 +103,6 @@ export class CharacterController {
     this.velocity.set(0, 0, 0);
     this.body.velocity.set(0, 0, 0);
 
-    // Garante que a malha visual permaneça alinhada ao centro da cápsula
     if (this.model) {
       this.model.position.set(0, 0, 0);
     }
@@ -357,7 +353,6 @@ export class CharacterController {
   update(delta) {
     if (!this.ready) return;
 
-    // Se estiver atordoado/caindo, desativa totalmente a velocidade do corpo físico
     if (this.isStunned) {
       this.body.velocity.set(0, 0, 0);
       this.velocity.set(0, 0, 0);

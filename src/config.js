@@ -21,7 +21,7 @@ export const CONFIG = {
     //jump: 'assets/anim_jump.glb',
   },
 
-  PLAYER_SPEED: 4.5,
+  PLAYER_SPEED: 40.5,
   PLAYER_RADIUS: 0.48,
   PLAYER_HEIGHT: 1.75,
   DEBUG: true,

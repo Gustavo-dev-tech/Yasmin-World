@@ -4,10 +4,14 @@ import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import * as CANNON from 'cannon-es';
 
 export class Dragon {
-  constructor({ scene, physics, player }) {
+  constructor({ scene, physics, player, listener, spawnPosition }) { 
     this.scene = scene;
     this.physics = physics;
     this.player = player;
+    this.listener = listener; 
+    
+    // Salva a posição inicial (ou usa o centro se não for informada)
+    this.spawnPosition = spawnPosition || new THREE.Vector3(0, 45.0, 0);
 
     this.group = new THREE.Group();
     this.scene.add(this.group);
@@ -21,43 +25,59 @@ export class Dragon {
     this.playerLeftLeg = null;
     this.playerRightLeg = null;
 
-    // Animação de Montar da Personagem
+    // Animação de Montar
     this.mountClip = null;
     this.mountAction = null;
 
-    // === CONFIGURAÇÕES GLOBAIS ===
-    this.GROUND_LIMIT = 0.5; // Limite strict do chão
+    // Áudio
+    this.flySound = null;
 
-    // === CONFIGURAÇÕES DE VOO (GTA Style + Mobile Smoothing) ===
-    // Valores de velocidade e rotação equilibrados.
-    // responsiveness baixa = inércia alta (mascara glitches de toque)
+    this.GROUND_LIMIT = 0.5;
+
+    // Configurações de Voo
     this.scale = 18.0;
     this.flySpeed = 18.0;   
     this.boostSpeed = 40.0; 
     this.groundSpeed = 4.5;
-    
-    // A rotação mais lenta ajuda a ignorar noise do toque falhando
     this.rotSpeed = 1.2; 
-
-    // O pulo do gato: flightResponsiveness define a suavidade da inércia.
-    // Baixei agressivamente (de 12.0 para 1.5). Isso faz o dragão ter "massa"
-    // e deslizar. Se houver um glitch de toque voltando a zero rápido,
-    // o dragão continua deslizando na direção anterior antes de notar.
     this.flightResponsiveness = 1.5; 
 
-    // Estado do Dragão
     this.isMounted = false;
     this.patrolAngle = 0;
     this.patrolRadius = 60.0;
     this.patrolAltitude = 45.0; 
     
-    // Vetor de Inércia (Dá a sensação de peso no movimento)
     this.velocity = new THREE.Vector3(0, 0, 0);
 
     this.debugLogTimer = 0;
     this.isLoaded = false;
+    this._loadSounds(); // <-- Carrega o áudio
     this._loadModel();
     this._loadMountAnimation();
+  }
+
+  // ==========================================
+  // CARREGADOR DE ÁUDIO 3D
+  // ==========================================
+  _loadSounds() {
+    if (!this.listener) return;
+
+    const audioLoader = new THREE.AudioLoader();
+    this.flySound = new THREE.PositionalAudio(this.listener);
+
+    // ATENÇÃO: Se o arquivo for .wav, mude a extensão abaixo
+    audioLoader.load('./assets/models/dragon-voando.mp3', (buffer) => {
+      this.flySound.setBuffer(buffer);
+      this.flySound.setRefDistance(15); // Distância onde o som começa a perder força
+      this.flySound.setMaxDistance(150); // Distância máxima para ouvir
+      this.flySound.setLoop(true); // Fica repetindo enquanto voa
+      this.flySound.setVolume(0.8);
+      
+      this.group.add(this.flySound); // Prende a "caixa de som" no dragão
+      console.log('[Dragon] Som de voo carregado com sucesso!');
+    }, undefined, (err) => {
+      console.warn('[Dragon] Erro ao carregar som de voo. Verifique o nome/extensão:', err);
+    });
   }
 
   _loadMountAnimation() {
@@ -141,7 +161,7 @@ export class Dragon {
         this.mountBone = bestBone || fallbackBone;
 
         this.group.add(model);
-        this.group.position.set(0, this.patrolAltitude, 0);
+        this.group.position.copy(this.spawnPosition);
 
         if (gltf.animations && gltf.animations.length > 0) {
           this.mixer = new THREE.AnimationMixer(model);
@@ -224,7 +244,7 @@ export class Dragon {
       }
 
       const dropPos = this.group.position.clone();
-      dropPos.y = this.GROUND_LIMIT; // Garante que ele pouse ao desmontar
+      dropPos.y = this.GROUND_LIMIT; 
       dropPos.x += 8.0;
 
       player.group.position.copy(dropPos);
@@ -244,15 +264,11 @@ export class Dragon {
       this.isMounted = true;
       console.log('[Dragon] Montado no dorso do dragão (Grounded)!');
 
-      // Reseta inércia e rotações anormais ao montar
       this.velocity.set(0, 0, 0);
       this.group.rotation.x = 0; 
 
-      // FIX (Goal 1): Ao montar, deita no chão onde o jogador está.
-      // O dragão autônomo já pousa quando perto, então devemos estar no chão.
       this.group.position.x = player.group.position.x;
       this.group.position.z = player.group.position.z;
-      // Garante que monta no chão strict
       this.group.position.y = this.GROUND_LIMIT; 
 
       if (player.body) {
@@ -290,7 +306,6 @@ export class Dragon {
     // ==========================================
     if (this.isMounted) {
       
-      // Ajuste anatômico perfeito (Abraçando o pescoço)
       this._cachePlayerLegBones();
       if (this.playerLeftLeg && this.playerRightLeg) {
         this.playerLeftLeg.rotation.z -= 1.1;
@@ -304,11 +319,6 @@ export class Dragon {
       const { forward, right, isRunning } = input ? input.getMovement() : { forward: 0, right: 0, isRunning: false };
       const currentSpeed = isRunning ? this.boostSpeed : this.flySpeed;
 
-      // ----------------------------------------------------------------------
-      // SISTEMA DE VOO ESTILO GTA 5 (FOCADO EM MOBILE/ÚNICO ANALÓGICO & PC)
-      // ----------------------------------------------------------------------
-      
-      // Busca a câmera ativa da cena (swipe/touch no mobile ou mouse no PC)
       let activeCamera = null;
       this.scene.traverse((child) => {
           if (child.isPerspectiveCamera) activeCamera = child;
@@ -317,18 +327,14 @@ export class Dragon {
       const moveDir = new THREE.Vector3();
 
       if (activeCamera) {
-          // Extrai o vetor 3D exato de onde a câmera está apontando (Incluindo cima/baixo)
           const camForward = new THREE.Vector3();
           activeCamera.getWorldDirection(camForward);
           
-          // O eixo horizontal puro (Para andar pros lados sem alterar a altitude)
           const camRightDir = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
 
-          // Empurra o dragão na direção da visão da câmera
           moveDir.addScaledVector(camForward, forward);
           moveDir.addScaledVector(camRightDir, right);
       } else {
-          // Fallback seguro caso a câmera não seja encontrada
           const camForward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw)).normalize();
           const camRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
           moveDir.addScaledVector(camForward, forward);
@@ -339,61 +345,42 @@ export class Dragon {
         moveDir.normalize();
       }
 
-      // ----------------------------------------------------------------------
-      // INÉRCIA REFORÇADA (Goal 2 Mitigation)
-      // Mascara glitches momentâneos do multi-touch que falha no mobile
-      // ----------------------------------------------------------------------
       const targetVelocity = moveDir.clone().multiplyScalar(currentSpeed);
-      // Fator baixo (this.flightResponsiveness) = inércia alta/massa alta.
-      // Se o toque falhar por um frame e voltar a zero, o dragão desliza na velocidade antiga.
       this.velocity.lerp(targetVelocity, delta * this.flightResponsiveness);
 
-      // Aplica a velocidade inercial fisicamente no dragão
       dragonPos.addScaledVector(this.velocity, delta);
 
-      // --- POUSO E COLISÃO COM O CHÃO Strict ---
-      // Se mergulhar até o chão ou estiver parado nele:
       if (dragonPos.y < this.GROUND_LIMIT) {
           dragonPos.y = this.GROUND_LIMIT;
           
-          // Importante: Zerar a velocidade vertical negativa acumulada
           if (this.velocity.y < 0) this.velocity.y = 0; 
           
-          // Lógica de Animação de Pouso/Decolagem:
-          // Se estiver grudado no chão strict, force animações terrestres
           if(isRunning || Math.abs(forward) > 0.1 || Math.abs(right) > 0.1) {
               this._playBestAnimation(['run', 'trot', 'walk']);
           } else {
               this._playBestAnimation(['idle', 'stand']);
           }
       } else {
-          // No ar: force voo
           this._playBestAnimation(['fly', 'flying', 'run']);
       }
 
-      // --- ROTAÇÃO SUAVE ESQUERDA/DIREITA (Yaw) ---
       const flatVel = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
       if (flatVel.lengthSq() > 0.1) {
         const targetAngle = Math.atan2(flatVel.x, flatVel.z);
         let diff = targetAngle - this.group.rotation.y;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-        // rotação lenta ajuda na suavidade mobile contra noise de toque
         this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
       }
 
-      // --- INCLINAÇÃO MERGULHO/SUBIDA (Pitch) ---
-      // Se ganha altura, empina o corpo; se mergulha, embica o focinho.
       let targetPitch = 0;
       const speed = this.velocity.length();
       if (speed > 0.5) {
           targetPitch = Math.asin(this.velocity.y / speed); 
       }
-      // Inclinação também suavizada LERP
       this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, targetPitch, delta * 2.5);
 
-      // --- CÁLCULO DE POSIÇÃO DO PERSONAGEM (Grudado no dorso) ---
       const offsetX = 0.0;
-      const offsetY = -0.3; // Força de colagem para dar sensação de peso.
+      const offsetY = -0.3; 
       const offsetZ = -0.2;
 
       let riderPos = new THREE.Vector3();
@@ -422,56 +409,69 @@ export class Dragon {
         player.body.velocity.set(0, 0, 0);
       }
 
-      return;
-    }
-
+    } 
     // ==========================================
     // ESTADO 2: AUTÔNOMO (Patrulha ou Perseguição)
     // ==========================================
-    // Recupera a postura caso ele tenha sido desmontado inclinado para cima ou para baixo
-    this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, delta * 2.0);
+    else {
+      this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, delta * 2.0);
 
-    const playerPos = player.group.position;
-    const distXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).length();
+      const playerPos = player.group.position;
+      const distXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).length();
 
-    if (distXZ <= 35.0) {
-      // Pousar strict no chão autônomo
-      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.GROUND_LIMIT, delta * 2.0);
-      
-      const dirXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).normalize();
-      const targetAngle = Math.atan2(dirXZ.x, dirXZ.z);
-      let diff = targetAngle - this.group.rotation.y;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
+      if (distXZ <= 35.0) {
+        dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.GROUND_LIMIT, delta * 2.0);
+        
+        const dirXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).normalize();
+        const targetAngle = Math.atan2(dirXZ.x, dirXZ.z);
+        let diff = targetAngle - this.group.rotation.y;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
 
-      if (distXZ > 11.5) {
-        dragonPos.addScaledVector(dirXZ, this.groundSpeed * delta);
-        this._playBestAnimation(['walk', 'run', 'trot']);
+        if (distXZ > 11.5) {
+          dragonPos.addScaledVector(dirXZ, this.groundSpeed * delta);
+          this._playBestAnimation(['walk', 'run', 'trot']);
+        } else {
+          if(Math.abs(dragonPos.y - this.GROUND_LIMIT) < 0.1) dragonPos.y = this.GROUND_LIMIT;
+          this._playBestAnimation(['idle', 'stand']);
+        }
       } else {
-        // Se autônomo pousou e parou, trava Y strict
-        if(Math.abs(dragonPos.y - this.GROUND_LIMIT) < 0.1) dragonPos.y = this.GROUND_LIMIT;
-        this._playBestAnimation(['idle', 'stand']);
+        this.patrolAngle += delta * 0.25;
+        dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.patrolAltitude, delta * 1.5);
+
+        const targetX = playerPos.x + Math.cos(this.patrolAngle) * this.patrolRadius;
+        const targetZ = playerPos.z + Math.sin(this.patrolAngle) * this.patrolRadius;
+
+        const dirX = targetX - dragonPos.x;
+        const dirZ = targetZ - dragonPos.z;
+
+        const targetAngle = Math.atan2(dirX, dirZ);
+        let diff = targetAngle - this.group.rotation.y;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        this.group.rotation.y += diff * Math.min(delta * 1.5, 1.0);
+
+        const flyDir = new THREE.Vector3(Math.sin(this.group.rotation.y), 0, Math.cos(this.group.rotation.y));
+        dragonPos.addScaledVector(flyDir, 14.0 * delta);
+
+        this._playBestAnimation(['fly', 'flying', 'run']);
       }
-    } else {
-      this.patrolAngle += delta * 0.25;
-      // Garante que a altitude de patrulha seja respeitada autônomo
-      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.patrolAltitude, delta * 1.5);
+    }
 
-      const targetX = playerPos.x + Math.cos(this.patrolAngle) * this.patrolRadius;
-      const targetZ = playerPos.z + Math.sin(this.patrolAngle) * this.patrolRadius;
+    // ==========================================
+    // GERENCIADOR DINÂMICO DE ÁUDIO 3D
+    // ==========================================
+    if (this.flySound && this.flySound.buffer) {
+      // Verifica se a animação que está rodando é a de voo
+      const clipName = this.currentAction ? this.currentAction.getClip().name.toLowerCase() : '';
+      const isFlyingAnim = clipName.includes('fly') || clipName.includes('flying');
 
-      const dirX = targetX - dragonPos.x;
-      const dirZ = targetZ - dragonPos.z;
-
-      const targetAngle = Math.atan2(dirX, dirZ);
-      let diff = targetAngle - this.group.rotation.y;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      this.group.rotation.y += diff * Math.min(delta * 1.5, 1.0);
-
-      const flyDir = new THREE.Vector3(Math.sin(this.group.rotation.y), 0, Math.cos(this.group.rotation.y));
-      dragonPos.addScaledVector(flyDir, 14.0 * delta);
-
-      this._playBestAnimation(['fly', 'flying', 'run']);
+      if (isFlyingAnim && !this.flySound.isPlaying) {
+        this.flySound.play();
+      } else if (!isFlyingAnim && this.flySound.isPlaying) {
+        this.flySound.pause();
+      }
     }
   }
 }
+
+// this.group.position.set(0, this.patrolAltitude, 0);
