@@ -21,25 +21,27 @@ export class Dragon {
     this.playerLeftLeg = null;
     this.playerRightLeg = null;
 
-    // Animação de Montar da Personagem (montada_dragon.fbx)
+    // Animação de Montar da Personagem
     this.mountClip = null;
     this.mountAction = null;
 
-    // Configurações do Dragão Gigante (Escala 18x)
+    // Configurações Reduzidas (Reajustadas para melhor percepção)
     this.scale = 18.0;
-    this.flySpeed = 28.0;
-    this.boostSpeed = 50.0;
+    this.flySpeed = 18.0;   // Aumentado ligeiramente de 16.0 para melhor percepção
+    this.boostSpeed = 40.0; // Aumentado ligeiramente de 38.0
     this.groundSpeed = 4.5;
-    this.rotSpeed = 2.5;
+    this.rotSpeed = 1.8;    // Mantido
 
     // Estado do Dragão
     this.isMounted = false;
     this.patrolAngle = 0;
     this.patrolRadius = 60.0;
-    this.patrolAltitude = 35.0;
+    this.patrolAltitude = 45.0; // Aumentado de 35.0 para maior contraste
     
-    this.debugLogTimer = 0;
+    // Vetor de Inércia (Dá a sensação de peso no movimento)
+    this.velocity = new THREE.Vector3(0, 0, 0);
 
+    this.debugLogTimer = 0;
     this.isLoaded = false;
     this._loadModel();
     this._loadMountAnimation();
@@ -200,6 +202,12 @@ export class Dragon {
   toggleMount(player, dogsManager) {
     if (!this.isLoaded || !player) return;
 
+    // Reseta inércia e rotações anormais ao montar/desmontar
+    this.velocity.set(0, 0, 0);
+    this.group.rotation.x = 0; 
+
+    const groundLimit = 0.5; 
+
     if (this.isMounted) {
       this.isMounted = false;
 
@@ -209,7 +217,7 @@ export class Dragon {
       }
 
       const dropPos = this.group.position.clone();
-      dropPos.y = 0;
+      dropPos.y = groundLimit; // Garante que ele pouse, não fique flutuando
       dropPos.x += 8.0;
 
       player.group.position.copy(dropPos);
@@ -228,9 +236,10 @@ export class Dragon {
     } else {
       this.isMounted = true;
 
+      // Mantém a posição X/Z do jogador, mas ajusta a altura de montagem
       this.group.position.x = player.group.position.x;
       this.group.position.z = player.group.position.z;
-      this.group.position.y = 22.0;
+      this.group.position.y = 22.0; // Altura para o dorso da personagem
 
       if (player.body) {
         player.body.type = CANNON.Body.KINEMATIC;
@@ -268,17 +277,13 @@ export class Dragon {
     if (this.isMounted) {
       this._playBestAnimation(['fly', 'flying', 'run']);
 
+      // Ajuste anatômico (Peso e colagem nas escamas)
       this._cachePlayerLegBones();
       if (this.playerLeftLeg && this.playerRightLeg) {
-        // Z: Abre as pernas lateralmente (Muito mais aberto agora)
         this.playerLeftLeg.rotation.z -= 1.1;
         this.playerRightLeg.rotation.z += 1.1;
-        
-        // X: Levanta as coxas para não entrarem na malha (Acompanha a espessura)
         this.playerLeftLeg.rotation.x -= 0.5; 
         this.playerRightLeg.rotation.x -= 0.5; 
-        
-        // Y: Gira o joelho/pé para fora, abraçando o formato cilíndrico do dragão
         this.playerLeftLeg.rotation.y -= 0.3;
         this.playerRightLeg.rotation.y += 0.3;
       }
@@ -286,32 +291,81 @@ export class Dragon {
       const { forward, right, isRunning } = input ? input.getMovement() : { forward: 0, right: 0, isRunning: false };
       const currentSpeed = isRunning ? this.boostSpeed : this.flySpeed;
 
-      if (forward !== 0 || right !== 0) {
-        const moveDir = new THREE.Vector3();
-        
-        const camForward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw)).normalize();
-        const camRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
+      // ----------------------------------------------------------------------
+      // SISTEMA DE VOO ESTILO GTA 5 (FOCADO EM MOBILE/ÚNICO ANALÓGICO & PC)
+      // ----------------------------------------------------------------------
+      
+      // Busca a câmera ativa da cena (Controlada pelo swipe/touch da tela ou mouse no PC)
+      let activeCamera = null;
+      this.scene.traverse((child) => {
+          if (child.isPerspectiveCamera) activeCamera = child;
+      });
 
-        moveDir.addScaledVector(camForward, forward);
-        moveDir.addScaledVector(camRight, right);
+      const moveDir = new THREE.Vector3();
+
+      if (activeCamera) {
+          // Extrai o vetor 3D exato de onde a câmera está apontando (Incluindo cima/baixo)
+          const camForward = new THREE.Vector3();
+          activeCamera.getWorldDirection(camForward);
+          
+          // O eixo horizontal puro (Para andar pros lados sem alterar a altitude)
+          const camRightDir = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
+
+          // Empurra o dragão na direção da visão da câmera
+          moveDir.addScaledVector(camForward, forward);
+          moveDir.addScaledVector(camRightDir, right);
+      } else {
+          // Fallback seguro caso a câmera não seja encontrada no primeiro frame
+          const camForward = new THREE.Vector3(-Math.sin(cameraYaw), 0, -Math.cos(cameraYaw)).normalize();
+          const camRight = new THREE.Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw)).normalize();
+          moveDir.addScaledVector(camForward, forward);
+          moveDir.addScaledVector(camRight, right);
+      }
+
+      if (moveDir.lengthSq() > 0) {
         moveDir.normalize();
+      }
 
-        const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+      // --- INÉRCIA (FLUIDEZ) ---
+      // Interpola a velocidade gradativamente em vez de arrancar de forma robótica
+      const targetVelocity = moveDir.clone().multiplyScalar(currentSpeed);
+      // Fator de inércia maior para movimento montado ser muito mais responsivo no PC
+      const responsiveness = 12.0; 
+      this.velocity.lerp(targetVelocity, delta * responsiveness);
+
+      // Aplica a velocidade fisicamente no dragão
+      dragonPos.addScaledVector(this.velocity, delta);
+
+      // --- COLISÃO BÁSICA COM O CHÃO (Impede cavar a terra) ---
+      const groundLimit = 0.5; 
+      if (dragonPos.y < groundLimit) {
+          dragonPos.y = groundLimit;
+          // Zera a velocidade de descida para não acumular
+          if (this.velocity.y < 0) this.velocity.y = 0; 
+      }
+
+      // --- ROTAÇÃO SUAVE (EIXO Y - ESQUERDA/DIREITA) ---
+      const flatVel = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
+      if (flatVel.lengthSq() > 0.1) {
+        const targetAngle = Math.atan2(flatVel.x, flatVel.z);
         let diff = targetAngle - this.group.rotation.y;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
         this.group.rotation.y += diff * Math.min(delta * this.rotSpeed, 1.0);
-
-        dragonPos.addScaledVector(moveDir, currentSpeed * delta);
       }
 
-      dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, 22.0, delta * 2.0);
+      // --- INCLINAÇÃO DINÂMICA (EIXO X - MERGULHO/SUBIDA) ---
+      // Se ele ganha altura (voando pra cima), empina o corpo. Se afunda, embica o focinho.
+      let targetPitch = 0;
+      const speed = this.velocity.length();
+      if (speed > 0.5) {
+          targetPitch = Math.asin(this.velocity.y / speed); 
+      }
+      this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, targetPitch, delta * 2.5);
 
-      // ==========================================
-      // CÁLCULO DE POSIÇÃO CORRIGIDO (Sentando a personagem na pele)
-      // ==========================================
+      // --- CÁLCULO DE POSIÇÃO DO PERSONAGEM (Grudado no dorso) ---
       const offsetX = 0.0;
-      const offsetY = -0.1; // Reduzido de 0.2 para -0.1, garantindo que o quadril grude nas escamas.
-      const offsetZ = -0.2; // Mantido o alinhamento com a junta.
+      const offsetY = -0.3; // Força de colagem para dar sensação de peso.
+      const offsetZ = -0.2;
 
       let riderPos = new THREE.Vector3();
 
@@ -339,23 +393,15 @@ export class Dragon {
         player.body.velocity.set(0, 0, 0);
       }
 
-      this.debugLogTimer += delta;
-      if (this.debugLogTimer >= 2.0) {
-          console.log(`[Status Montaria] Osso Animado Sólido: ${this.mountBone ? this.mountBone.name : 'NENHUM'}`);
-          console.log(`[Posição Personagem] Offsets Relativos ao Osso: Altura(Y)=${offsetY}, Frente/Trás(Z)=${offsetZ}`);
-          this.debugLogTimer = 0;
-      }
-
-      if (dogsManager && dogsManager.companion) {
-        dogsManager.companion.visible = false;
-      }
-
       return;
     }
 
     // ==========================================
-    // ESTADO 2: AUTÔNOMO
+    // ESTADO 2: AUTÔNOMO (Patrulha ou Perseguição)
     // ==========================================
+    // Recupera a postura caso ele tenha sido desmontado inclinado para cima ou para baixo
+    this.group.rotation.x = THREE.MathUtils.lerp(this.group.rotation.x, 0, delta * 2.0);
+
     const playerPos = player.group.position;
     const distXZ = new THREE.Vector3(playerPos.x - dragonPos.x, 0, playerPos.z - dragonPos.z).length();
 
@@ -376,6 +422,7 @@ export class Dragon {
       }
     } else {
       this.patrolAngle += delta * 0.25;
+      // Garante que a altitude de patrulha seja respeitada corretamente
       dragonPos.y = THREE.MathUtils.lerp(dragonPos.y, this.patrolAltitude, delta * 1.5);
 
       const targetX = playerPos.x + Math.cos(this.patrolAngle) * this.patrolRadius;
