@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import GUI from 'lil-gui';
 import { CONFIG } from './config.js';
 import { PhysicsWorld } from './physics/Physics.js';
 import { CharacterController } from './player/CharacterController.js';
 import { OrbitCameraRig } from './player/OrbitCameraRig.js';
 import { DayNightCycle } from './world/DayNightCycle.js';
+import { WaterSystem } from './world/WaterSystem.js';
 import { World } from './world/World.js';
 import { Castle } from './world/Castle.js'; 
 import { Escada } from './world/Escada.js';
@@ -25,8 +27,6 @@ import { Shop } from './world/Shop.js';
 // CENA, CÂMERA, RENDERER E CICLO DIA/NOITE
 // ==========================================
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#87CEEB'); 
-scene.fog = new THREE.Fog('#87CEEB', 200, 1200);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
 const listener = new THREE.AudioListener();
@@ -34,6 +34,7 @@ camera.add(listener);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -62,6 +63,26 @@ const player = new CharacterController({
 });
 
 const world = new World({ scene, physics });
+
+// Lagoa Cristalinas AAA posicionada próxima ao spawn e à moto
+const water = new WaterSystem({
+  scene,
+  position: new THREE.Vector3(-35, 0.38, 125),
+  size: 90,
+  resolution: 128
+});
+
+// Painel lil-gui para ajuste da Água e Clima (Tecla G mostra/esconde)
+const waterGui = new GUI({ title: '🌊 Água & Clima (Tecla G)' });
+water.attachGUI(waterGui, dayNight);
+waterGui.close(); // Começa fechado para não atrapalhar o menu inicial
+
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'g') {
+    waterGui._hidden ? waterGui.show() : waterGui.hide();
+  }
+});
+
 const castle = new Castle({ scene });
 const escada = new Escada({ 
   scene, 
@@ -82,7 +103,6 @@ const dragon = new Dragon({
   spawnPosition: new THREE.Vector3(400, 45.0, -400) 
 });
 
-// Instancia a Honda Twister 300 próxima ao ponto inicial do jogador e da Loja
 const moto = new Motorcycle({
   scene,
   physics,
@@ -141,7 +161,6 @@ if (btnRide) {
   });
 }
 
-// Atalho Tecla E no teclado para subir/descer da moto rapidamente
 window.addEventListener('keydown', (e) => {
   if (!isGameStarted || pauseMenu.isPaused || loja.shopActive) return;
   if (e.key.toLowerCase() === 'e' && moto && moto.isLoaded && !dragon.isMounted) {
@@ -199,10 +218,11 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
 
-  dayNight.update(delta);
-
-  // Posição ativa do jogador no mundo (a pé ou sobre a moto)
   const activePlayerPos = (moto && moto.isMounted) ? moto.group.position : player.group.position;
+
+  // Atualiza céu/chuva acompanhando o jogador e sincroniza o sistema de água
+  dayNight.update(delta, activePlayerPos);
+  water.update(delta, elapsed, activePlayerPos, dayNight);
 
   // Controles do Gamepad (Xbox)
   const padState = input.getGamepadState();
@@ -260,7 +280,6 @@ function animate() {
 
     const actionBtns = actionsPanel ? actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-ride):not(#btn-pause)') : [];
 
-    // Atualiza botão de Montar no Dragão
     if (dragon && dragon.isLoaded && btnMount) {
       const distDragon = activePlayerPos.distanceTo(dragon.group.position);
       if (dragon.isMounted) {
@@ -274,7 +293,6 @@ function animate() {
       }
     }
 
-    // Atualiza botão de Pilotar a Moto
     if (moto && moto.isLoaded && btnRide) {
       const distMoto = activePlayerPos.distanceTo(moto.group.position);
       if (moto.isMounted) {
@@ -288,14 +306,12 @@ function animate() {
       }
     }
 
-    // Esconde botões de Dançar/Comemorar quando estiver voando ou pilotando
     if (dragon.isMounted || moto.isMounted) {
       actionBtns.forEach((btn) => btn.classList.add('hidden'));
     } else {
       actionBtns.forEach((btn) => btn.classList.remove('hidden'));
     }
 
-    // Atualização de Movimento (Dragão vs Moto vs A Pé)
     if (dragon && dragon.isMounted) {
       dragon.update(delta, player, input, orbitCamera.yaw, dogs);
       moto.update(delta, player, input);
