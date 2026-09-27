@@ -78,7 +78,134 @@ export class Motorcycle {
     this.cfg = { ...FINAL_RIDER_CONFIG };
     this.modelYawOffset = this.cfg.modelYawOffset;
 
+    // Estado do Farol e Automação
+    this.headlightOn = false;
+    this._lastAutoEnvDark = null;
+
+    this._buildHeadlightSystem();
     this._loadModel();
+  }
+
+  // =========================================================================
+  // SISTEMA DE FAROL DE LED BRANCO + FEIXE VOLUMÉTRICO + LANTERNA TRASEIRA
+  // =========================================================================
+  _createLightFlareTexture() {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+    grad.addColorStop(0.25, 'rgba(230, 245, 255, 0.85)');
+    grad.addColorStop(0.6, 'rgba(180, 220, 255, 0.25)');
+    grad.addColorStop(1.0, 'rgba(180, 220, 255, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+  }
+
+  _buildHeadlightSystem() {
+    this.headlightGroup = new THREE.Group();
+    // Posição exata do bloco óptico dianteiro da Twister 300 (frente aponta para -Z)
+    this.headlightGroup.position.set(0, 0.78, -0.82);
+    this.leanGroup.add(this.headlightGroup);
+
+    // 1. SpotLight Principal (Feixe de luz branca real que ilumina o cenário à frente)
+    this.spotLight = new THREE.SpotLight(0xf5faff, 0, 75, Math.PI / 4.2, 0.45, 1.3);
+    this.spotLight.position.set(0, 0, 0);
+    this.spotLight.castShadow = false; // Evita peso extra na GPU mobile
+
+    this.spotTarget = new THREE.Object3D();
+    this.spotTarget.position.set(0, -0.62, -16.0);
+    this.headlightGroup.add(this.spotTarget);
+    this.spotLight.target = this.spotTarget;
+    this.headlightGroup.add(this.spotLight);
+
+    // 2. Luz curta de presença no farol (ilumina o para-lama dianteiro e o chão imediato)
+    this.bulbLight = new THREE.PointLight(0xffffff, 0, 4.5, 2.0);
+    this.bulbLight.position.set(0, 0, -0.08);
+    this.headlightGroup.add(this.bulbLight);
+
+    // 3. Brilho óptico na lente do farol (Flare Sprite)
+    const flareTex = this._createLightFlareTexture();
+    this.headlightFlare = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: flareTex,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false
+      })
+    );
+    this.headlightFlare.scale.set(0.65, 0.65, 1);
+    this.headlightFlare.position.set(0, 0, -0.05);
+    this.headlightGroup.add(this.headlightFlare);
+
+    // 4. Cone Volumétrico Suave (Feixe de luz visível no ar/neblina)
+    const coneLength = 14.0;
+    const coneRadius = 3.2;
+    const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 24, 1, true);
+    // Gira o cone para que o bico fique no farol (0,0,0) e a base se abra para a frente (-Z)
+    coneGeo.translate(0, -coneLength / 2, 0);
+    coneGeo.rotateX(Math.PI / 2);
+
+    this.lightBeamMesh = new THREE.Mesh(
+      coneGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0xe8f4ff,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      })
+    );
+    this.lightBeamMesh.rotation.x = -0.04; // Levemente inclinado para a pista
+    this.headlightGroup.add(this.lightBeamMesh);
+
+    // 5. Lanterna Traseira / Luz de Freio (Vermelha)
+    this.tailLightSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: flareTex,
+        color: 0xff1111,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false
+      })
+    );
+    this.tailLightSprite.position.set(0, 0.84, 0.92);
+    this.tailLightSprite.scale.set(0.35, 0.25, 1);
+    this.leanGroup.add(this.tailLightSprite);
+
+    this.setHeadlight(false);
+  }
+
+  setHeadlight(state) {
+    this.headlightOn = Boolean(state);
+
+    if (this.headlightOn) {
+      this.spotLight.intensity = 24.0;
+      this.bulbLight.intensity = 2.5;
+      this.headlightFlare.material.opacity = 0.95;
+      this.lightBeamMesh.material.opacity = 0.08;
+      this.tailLightSprite.material.opacity = 0.65;
+    } else {
+      this.spotLight.intensity = 0;
+      this.bulbLight.intensity = 0;
+      this.headlightFlare.material.opacity = 0;
+      this.lightBeamMesh.material.opacity = 0;
+      this.tailLightSprite.material.opacity = 0;
+    }
+
+    return this.headlightOn;
+  }
+
+  toggleHeadlight() {
+    return this.setHeadlight(!this.headlightOn);
   }
 
   async _loadModel() {
@@ -134,7 +261,7 @@ export class Motorcycle {
       }
 
       this.isLoaded = true;
-      console.log('[Motorcycle] Honda Twister 300 pronta com pose calibrada!');
+      console.log('[Motorcycle] Honda Twister 300 pronta com pose e farol LED!');
     } catch (err) {
       console.error('[Motorcycle] Erro ao carregar moto_twister_300.glb:', err);
     }
@@ -272,8 +399,24 @@ export class Motorcycle {
     });
   }
 
-  update(delta, player, input) {
+  update(delta, player, input, dayNight = null) {
     if (!this.isLoaded) return;
+
+    // Automação inteligente do farol: acende sozinho ao anoitecer ou chover,
+    // mas permite que o jogador ligue/desligue manualmente a qualquer momento!
+    if (dayNight) {
+      const isEnvDark = Boolean(
+        (dayNight.isNight && dayNight.isNight()) ||
+        (dayNight.isRaining && dayNight.isRaining())
+      );
+      if (this._lastAutoEnvDark === null) {
+        this._lastAutoEnvDark = isEnvDark;
+        if (isEnvDark) this.setHeadlight(true);
+      } else if (isEnvDark !== this._lastAutoEnvDark) {
+        this._lastAutoEnvDark = isEnvDark;
+        this.setHeadlight(isEnvDark);
+      }
+    }
 
     if (!this.isMounted) {
       this.speed = THREE.MathUtils.lerp(this.speed, 0, delta * 5);
@@ -281,6 +424,13 @@ export class Motorcycle {
     } else {
       const { forward, right, isRunning } = input.getMovement();
       const currentMaxSpeed = isRunning ? this.boostSpeed : this.maxSpeed;
+
+      // Acende a luz de freio traseira mais forte quando aperta S (forward < -0.05)
+      const isBraking = forward < -0.05;
+      if (this.tailLightSprite) {
+        this.tailLightSprite.material.opacity = isBraking ? 1.0 : (this.headlightOn ? 0.65 : 0.0);
+        this.tailLightSprite.scale.setScalar(isBraking ? 0.48 : 0.35);
+      }
 
       if (forward > 0.05) {
         this.speed += forward * this.acceleration * delta;

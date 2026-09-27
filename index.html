@@ -218,6 +218,7 @@
    <div id="actions-panel">
         <button id="btn-mount" class="btn-action hidden">🐉 Montar</button>
         <button id="btn-ride" class="btn-action hidden">🏍️ Pilotar</button>
+        <button id="btn-headlight" class="btn-action hidden">💡 Farol: OFF</button>
         <button id="btn-pause" class="btn-action">⏸️ Pause</button>
         <button class="btn-action" onclick="window.triggerAnim('dance')">✨ Dançar</button>
         <button class="btn-action" onclick="window.triggerAnim('victory')">🎉 Comemorar</button>
@@ -234,8 +235,7 @@
         <p id="victory-modal-desc">Você concluiu o desafio!</p>
         <button id="btn-restart" onclick="document.getElementById('victory-modal').classList.add('hidden')">Continuar Jogando</button>
     </div>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nipplejs/0.10.1/nipplejs.min.js"></script>
     <script type="importmap">
     {
       "imports": {
@@ -270,5 +270,3 @@
 </html>
 
 <div id="actions-panel"></div>
-
-<script type="importmap"></script>
