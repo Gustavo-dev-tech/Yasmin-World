@@ -4,7 +4,7 @@ import { PhysicsWorld } from './physics/Physics.js';
 import { CharacterController } from './player/CharacterController.js';
 import { World } from './world/World.js';
 import { Castle } from './world/Castle.js'; 
-import { Escada } from './world/Escada.js'; // <-- IMPORTAÇÃO CORRETA
+import { Escada } from './world/Escada.js';
 import { Animals } from './world/Animals.js';
 import { Collectibles } from './world/Collectibles.js';
 import { Dragon } from './world/Dragon.js';
@@ -16,6 +16,7 @@ import { Dogs } from './world/Dogs.js';
 import { ForestManager } from './world/ForestManager.js';
 import { MainMenu } from './ui/MainMenu.js';
 import { PauseMenu } from './ui/PauseMenu.js';
+import { Shop } from './world/Shop.js';
 
 // ==========================================
 // CENA, CÂMERA, RENDERER E NÉVOA
@@ -78,7 +79,7 @@ class DayNightCycle {
     this.cornerLights = cornerLights;
 
     this.time = 8; 
-    this.timeSpeed = 0.5; 
+    this.timeSpeed = 0.1; 
 
     this.colors = {
       night: new THREE.Color('#020208'),
@@ -176,20 +177,17 @@ const player = new CharacterController({
 });
 
 const world = new World({ scene, physics });
-
-// O Castelo carrega de forma limpa pelo módulo
 const castle = new Castle({ scene });
-
-// A Escada é instanciada e posicionada próxima à muralha do castelo
 const escada = new Escada({ 
     scene, 
     physics, 
-    position: new THREE.Vector3(400, -0.2, -380) // Ajustaremos essas coordenadas baseados no seu teste visual
+    position: new THREE.Vector3(400, -0.2, -380)
 });
 
 const forestManager = new ForestManager({ scene, physics, obstacleMeshes: world.obstacleMeshes });
-const animals = new Animals({ scene, obstacleMeshes: world.obstacleMeshes });
+const animals = new Animals({ scene, physics, obstacleMeshes: world.obstacleMeshes });
 const collectibles = new Collectibles({ scene });
+const loja = new Shop(scene);
 
 const dragon = new Dragon({ 
     scene, 
@@ -338,11 +336,33 @@ const clock = new THREE.Clock();
 const uiContainer = document.getElementById('ui-container');
 const actionsPanel = document.getElementById('actions-panel');
 const modalControls = document.getElementById('modal-controls');
+const charSelectDiv = document.getElementById('character-select-menu');
+const mainMenuDiv = document.getElementById('main-menu');
 
 if (uiContainer) uiContainer.classList.add('hidden');
 if (actionsPanel) actionsPanel.classList.add('hidden');
 
 let isGameStarted = false;
+
+// ==========================================
+// EVENTOS DE JOGO (Loja, Montaria, Menus)
+// ==========================================
+window.addEventListener('roupaComprada', async (e) => {
+  const outfit = e.detail;
+  if (player && player.ready) {
+      const feedback = document.getElementById('shop-feedback');
+      if (feedback) feedback.innerText = "Vestindo roupa...";
+
+      await player.changeOutfit(outfit);
+      
+      if (feedback) {
+          feedback.innerText = "Roupa equipada!";
+          setTimeout(() => { feedback.innerText = ""; }, 1500);
+      }
+      // Fecha a loja e libera os movimentos da personagem automaticamente!
+      loja.close();
+  }
+});
 
 const btnMount = document.getElementById('btn-mount');
 if (btnMount) {
@@ -369,17 +389,32 @@ const pauseMenu = new PauseMenu({
   }
 });
 
+// Quando clica em START GAME, abre a tela de escolha (Yasmin / Gustavo)
 const mainMenu = new MainMenu({
   onStartGame: () => {
-    isGameStarted = true;
-    pauseMenu.canPause = true;
-    
-    if (uiContainer) uiContainer.classList.remove('hidden');
-    if (actionsPanel) actionsPanel.classList.remove('hidden');
-    
-    console.log('[Game] Jogo Iniciado!');
+    if (charSelectDiv) {
+      charSelectDiv.classList.remove('hidden');
+    }
   }
 });
+
+// Quando escolhe Yasmin ou Gustavo no card
+window.selectCharacter = async function(charId) {
+  if (charSelectDiv) charSelectDiv.classList.add('hidden');
+  if (mainMenuDiv) mainMenuDiv.classList.add('hidden');
+
+  if (player && player.ready) {
+    await player.changeOutfit(charId);
+  }
+
+  isGameStarted = true;
+  pauseMenu.canPause = true;
+  
+  if (uiContainer) uiContainer.classList.remove('hidden');
+  if (actionsPanel) actionsPanel.classList.remove('hidden');
+  
+  console.log(`[Game] Jogo Iniciado com: ${charId.toUpperCase()}!`);
+};
 
 // ==========================================
 // LOOP DE EXECUÇÃO DO JOGO
@@ -391,6 +426,62 @@ function animate() {
   const elapsed = clock.getElapsedTime();
 
   dayNight.update(delta);
+
+  // === LÓGICA DO CONTROLE XBOX ===
+  const padState = input.getGamepadState();
+
+  if (padState && isGameStarted && !pauseMenu.isPaused) {
+    
+    // NAVEGAÇÃO DA LOJA (Controle)
+    if (loja.shopActive) {
+        if (!window.lastPadTime) window.lastPadTime = 0;
+        
+        if (elapsed - window.lastPadTime > 0.2) {
+            const btns = Array.from(document.querySelectorAll('.shop-btn, #btn-close-shop'));
+            let activeIdx = btns.findIndex(b => b === document.activeElement);
+
+            const gamepad = input.getGamepad();
+            const yAxis = gamepad ? gamepad.axes[1] : 0;
+
+            if (padState.camY > 0.5 || yAxis > 0.5) {
+                activeIdx = (activeIdx + 1) % btns.length;
+                btns[activeIdx].focus();
+                window.lastPadTime = elapsed;
+            } else if (padState.camY < -0.5 || yAxis < -0.5) {
+                activeIdx = (activeIdx - 1 + btns.length) % btns.length;
+                btns[activeIdx].focus();
+                window.lastPadTime = elapsed;
+            }
+        }
+
+        if (padState.btnA && document.activeElement) {
+            document.activeElement.click();
+        }
+        
+        if (padState.btnB) {
+            loja.close(); // Destrava a loja e devolve o movimento!
+        }
+    } else {
+        // MODO NORMAL DE JOGO (Câmera e Dragão)
+        orbitCamera.yaw -= padState.camX * 0.05;
+        orbitCamera.pitch = THREE.MathUtils.clamp(
+          orbitCamera.pitch - padState.camY * 0.03,
+          orbitCamera.minPitch,
+          orbitCamera.maxPitch
+        );
+
+        if (padState.btnX && dragon) {
+          const dist = player.group.position.distanceTo(dragon.group.position);
+          if (dragon.isMounted || dist <= 10.0) {
+            dragon.toggleMount(player, dogs);
+          }
+        }
+
+        if (padState.btnY) {
+           if (player && !dragon.isMounted) player.playTrigger('dance');
+        }
+    }
+  }
 
   if (isGameStarted && !pauseMenu.isPaused) {
     physics.step(delta);
@@ -409,7 +500,7 @@ function animate() {
         if (btnMount) {
           if (dist <= 10.0) {
             btnMount.classList.remove('hidden');
-            btnMount.innerText = '🐉 Montar';
+            btnMount.innerText = '🐉 Montar (Botão X)';
           } else {
             btnMount.classList.add('hidden');
           }
@@ -421,8 +512,13 @@ function animate() {
     if (dragon && dragon.isMounted) {
       dragon.update(delta, player, input, orbitCamera.yaw, dogs);
     } else {
-      const { forward, right, isRunning } = input.getMovement();
-      player.setInput(forward, right, orbitCamera.yaw, isRunning);
+      // Só bloqueia o movimento enquanto a janela da loja estiver realmente aberta
+      if (!loja.shopActive) {
+          const { forward, right, isRunning } = input.getMovement();
+          player.setInput(forward, right, orbitCamera.yaw, isRunning);
+      } else {
+          player.setInput(0, 0, orbitCamera.yaw, false);
+      }
       player.update(delta, elapsed);
 
       dogs.update(delta);
@@ -436,6 +532,10 @@ function animate() {
     world.update(delta);
     forestManager.update(delta);
     animals.update(delta, elapsed);
+    
+    if (player && player.group) {
+        loja.update(player.group.position);
+    }
 
     orbitCamera.update(player.group.position, delta);
 

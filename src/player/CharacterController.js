@@ -7,6 +7,14 @@ const HIPS_ROTATION_CORRECTION =
 
 const ROOT_BONE_KEYWORDS = ['hips', 'pelvis', 'root'];
 
+const ONE_SHOT_ACTIONS = ['punch', 'kick', 'jump', 'victory', 'excited', 'falling', 'kiss'];
+
+// Catálogo de trajes. Pode migrar para o config.js (CONFIG.OUTFITS) sem mudar o código.
+const DEFAULT_OUTFITS = {
+  padrao: './assets/models/garota.glb',
+  vestido_branco: './assets/models/vestuario/garota_vestido_branco.glb',
+};
+
 function normalizeBoneName(name) {
   return name
     .replace(/^.*\|/, '')
@@ -29,16 +37,16 @@ export class CharacterController {
     position = new THREE.Vector3(),
     radius = 0.48,
     height = 1.75,
-    speed = 90.0, // <-- VELOCIDADE DOBRADA AQUI!
+    speed = 90.0,
   }) {
     this.scene = scene;
     this.physics = physics;
     this.debug = debug;
     this.height = height;
-    
+
     this.speed = speed;
     this.baseSpeed = speed;
-    this.runSpeed = speed * 1.8; // A corrida será 1.8x mais rápida que a caminhada nova
+    this.runSpeed = speed * 1.8;
 
     this.group = new THREE.Group();
     this.group.position.copy(position);
@@ -48,6 +56,16 @@ export class CharacterController {
     this.mixer = null;
     this.actions = {};
     this.currentActionName = null;
+
+    // --- NOVO: cache de dados independentes do esqueleto atual ---
+    // rawClips guarda os AnimationClip ORIGINAIS (sem retarget), que são a
+    // única coisa reaproveitável entre modelos. As actions e os clips já
+    // retargetados pertencem a um mixer/esqueleto específico e morrem no swap.
+    this.rawClips = {};       // { nome: AnimationClip cru }
+    this.retargetedClips = {}; // { nome: AnimationClip ligado ao esqueleto atual }
+    this.loader = new GLTFLoader();
+    this.isSwapping = false;
+    this.currentOutfitKey = 'padrao';
 
     this.bones = { leftArm: null, rightArm: null };
     this.bindPose = new Map();
@@ -62,6 +80,13 @@ export class CharacterController {
     this.isSpecialActionPlaying = false;
     this.isStunned = false;
     this.danceIndex = 0;
+
+    // Handler nomeado: precisa ser reanexado a cada mixer novo.
+    this._onMixerFinished = () => {
+      if (!this.isStunned) {
+        this.isSpecialActionPlaying = false;
+      }
+    };
 
     this.body = physics.addPlayerBody(radius, height, position);
     physics.link(this.body, this.group, -height / 2);
@@ -99,7 +124,7 @@ export class CharacterController {
 
     this.isStunned = true;
     this.isSpecialActionPlaying = true;
-    
+
     this.velocity.set(0, 0, 0);
     this.body.velocity.set(0, 0, 0);
 
@@ -119,70 +144,33 @@ export class CharacterController {
     }, 2200);
   }
 
-  async _load(modelUrl, walkAnimationUrl) {
-    const loader = new GLTFLoader();
+  // =========================================================================
+  // CARREGAMENTO INICIAL
+  // =========================================================================
 
+  async _load(modelUrl, walkAnimationUrl) {
     try {
-      const gltf = await loader.loadAsync(modelUrl);
+      const gltf = await this.loader.loadAsync(modelUrl);
       this.model = gltf.scene;
       this.debug?.dumpModel(gltf, modelUrl);
 
-      this.model.traverse((child) => {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-
-          const materials = Array.isArray(child.material) ? child.material : [child.material];
-          materials.forEach((mat) => {
-            if (!mat) return;
-            if ('metalness' in mat) mat.metalness = 0.0;
-            if ('roughness' in mat) mat.roughness = 0.6;
-          });
-        }
-
-        if (child.isBone) {
-          this.bindPose.set(child, child.quaternion.clone());
-          const clean = normalizeBoneName(child.name);
-          this.boneMap[clean] = child.name;
-
-          if (clean.includes('arm') && !clean.includes('fore') && !clean.includes('hand')) {
-            if (clean.includes('left') || clean.startsWith('l')) this.bones.leftArm = this.bones.leftArm || child;
-            if (clean.includes('right') || clean.startsWith('r')) this.bones.rightArm = this.bones.rightArm || child;
-          }
-        }
-      });
-
-      this.model.position.set(0, 0, 0);
-      this.model.rotation.y = 0;
-      this.model.scale.set(1, 1, 1);
-      this.model.updateMatrixWorld(true);
-
-      const box = new THREE.Box3().setFromObject(this.model);
-      const size = box.getSize(new THREE.Vector3());
-
-      if (size.y > 0.01) {
-        const scaleFactor = this.height / size.y;
-        this.model.scale.setScalar(scaleFactor);
-        this.model.updateMatrixWorld(true);
-      }
-
+      this._prepareMaterials(this.model);
+      this._fitModel(this.model);
       this.group.add(this.model);
-      this.mixer = new THREE.AnimationMixer(this.model);
 
-      this.mixer.addEventListener('finished', () => {
-        if (!this.isStunned) {
-          this.isSpecialActionPlaying = false;
-        }
-      });
+      // Precisa vir DEPOIS do add/updateMatrixWorld: preenche boneMap/bindPose.
+      this._scanSkeleton(this.model);
+
+      this._createMixer();
 
       if (walkAnimationUrl) {
-        await this._loadSingleAnimation('walk', walkAnimationUrl, loader);
+        await this._loadSingleAnimation('walk', walkAnimationUrl);
       }
 
       if (CONFIG.ANIMATIONS) {
         for (const [key, url] of Object.entries(CONFIG.ANIMATIONS)) {
           if (url) {
-            await this._loadSingleAnimation(key, url, loader);
+            await this._loadSingleAnimation(key, url);
           }
         }
       }
@@ -193,28 +181,104 @@ export class CharacterController {
     }
   }
 
-  async _loadSingleAnimation(name, url, loader) {
-    try {
-      const animGltf = await loader.loadAsync(url);
-      const rawClip = animGltf.animations?.[0];
-      if (rawClip) {
-        const clip = this._retargetClip(rawClip, this.boneMap);
-        if (clip.tracks.length > 0) {
-          const action = this.mixer.clipAction(clip);
-          
-          if (['punch', 'kick', 'jump', 'victory', 'excited', 'falling', 'kiss'].includes(name)) {
-            action.setLoop(THREE.LoopOnce, 1);
-            action.clampWhenFinished = true;
-          } else {
-            action.setLoop(THREE.LoopRepeat, Infinity);
-          }
+  _prepareMaterials(model) {
+    model.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+      child.frustumCulled = false; // evita sumiço da malha animada em close-up
 
-          this.actions[name] = action;
-        }
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((mat) => {
+        if (!mat) return;
+        if ('metalness' in mat) mat.metalness = 0.0;
+        if ('roughness' in mat) mat.roughness = 0.6;
+      });
+    });
+  }
+
+  // Normaliza transform e reescala para a altura da cápsula de física.
+  // Sempre recalculado a partir da bounding box do modelo NOVO — copiar o
+  // scale antigo dá tamanho errado quando o .glb tem proporção diferente.
+  _fitModel(model) {
+    model.position.set(0, 0, 0);
+    model.rotation.set(0, 0, 0);
+    model.scale.set(1, 1, 1);
+    model.updateMatrixWorld(true);
+
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+
+    if (size.y > 0.01) {
+      const scaleFactor = this.height / size.y;
+      model.scale.setScalar(scaleFactor);
+      model.updateMatrixWorld(true);
+    }
+  }
+
+  // Reconstrói boneMap, bindPose e as referências de braço para o esqueleto ATUAL.
+  // Sem isso, `_applyRestPose()` continua mexendo nos ossos do modelo destruído
+  // e a personagem nova fica literalmente em T-Pose quando está parada.
+  _scanSkeleton(model) {
+    this.bindPose = new Map();
+    this.boneMap = {};
+    this.bones = { leftArm: null, rightArm: null };
+
+    model.traverse((child) => {
+      if (!child.isBone) return;
+
+      this.bindPose.set(child, child.quaternion.clone());
+      const clean = normalizeBoneName(child.name);
+      this.boneMap[clean] = child.name;
+
+      if (clean.includes('arm') && !clean.includes('fore') && !clean.includes('hand')) {
+        if (clean.includes('left') || clean.startsWith('l')) this.bones.leftArm = this.bones.leftArm || child;
+        if (clean.includes('right') || clean.startsWith('r')) this.bones.rightArm = this.bones.rightArm || child;
       }
+    });
+  }
+
+  _createMixer() {
+    this.mixer = new THREE.AnimationMixer(this.model);
+    // O listener 'finished' precisa ser reanexado sempre. Se ele se perder,
+    // `isSpecialActionPlaying` trava em true e a máquina de estados congela.
+    this.mixer.addEventListener('finished', this._onMixerFinished);
+  }
+
+  async _loadSingleAnimation(name, url) {
+    try {
+      const animGltf = await this.loader.loadAsync(url);
+      const rawClip = animGltf.animations?.[0];
+      if (!rawClip) return;
+
+      this.rawClips[name] = rawClip; // guarda o clip CRU para poder re-retargetar
+      this._createAction(name, rawClip);
     } catch (err) {
       console.warn(`[CharacterController] Erro ao carregar animação "${name}":`, err);
     }
+  }
+
+  // Retargeta um clip cru contra o esqueleto atual e cria a action no mixer atual.
+  _createAction(name, rawClip) {
+    if (!this.mixer) return;
+
+    const clip = this._retargetClip(rawClip, this.boneMap);
+    if (clip.tracks.length === 0) {
+      console.warn(`[CharacterController] Clip "${name}" não casou com nenhum osso do modelo atual.`);
+      return;
+    }
+
+    const action = this.mixer.clipAction(clip);
+
+    if (ONE_SHOT_ACTIONS.includes(name)) {
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+    } else {
+      action.setLoop(THREE.LoopRepeat, Infinity);
+    }
+
+    this.retargetedClips[name] = clip;
+    this.actions[name] = action;
   }
 
   _retargetClip(rawClip, boneMap) {
@@ -283,6 +347,130 @@ export class CharacterController {
     return new THREE.QuaternionKeyframeTrack(track.name, track.times, newValues);
   }
 
+  // =========================================================================
+  // HOT-SWAP DE MODELO (LOJA DE ROUPAS)
+  // =========================================================================
+
+  async changeOutfit(modeloKey) {
+    if (!this.model || this.isSwapping) return;
+
+    const catalog = CONFIG.OUTFITS || DEFAULT_OUTFITS;
+    const targetUrl = catalog[modeloKey];
+    if (!targetUrl) {
+      console.warn(`[CharacterController] Traje desconhecido: "${modeloKey}"`);
+      return;
+    }
+    if (modeloKey === this.currentOutfitKey) return;
+
+    this.isSwapping = true;
+    this.ready = false; // congela update() enquanto o esqueleto não existe
+
+    try {
+      const gltf = await this.loader.loadAsync(targetUrl);
+      const novoModel = gltf.scene;
+
+      // --- 1. Desmonta o antigo por completo ---
+      if (this.mixer) {
+        this.mixer.stopAllAction();
+        this.mixer.removeEventListener('finished', this._onMixerFinished);
+        // Limpa o cache de PropertyBinding do mixer. Sem isso o Three segura
+        // referências aos ossos destruídos (vazamento + bindings fantasmas).
+        Object.values(this.retargetedClips).forEach((clip) => this.mixer.uncacheClip(clip));
+        this.mixer.uncacheRoot(this.model);
+        this.mixer = null;
+      }
+
+      this.group.remove(this.model);
+      this._disposeModel(this.model);
+
+      this.actions = {};
+      this.retargetedClips = {};
+      this.currentActionName = null;
+
+      // --- 2. Monta o novo ---
+      this._prepareMaterials(novoModel);
+      this.model = novoModel;
+      this.group.add(novoModel);
+      this._fitModel(novoModel);       // recalcula escala pela bounding box real
+      this._scanSkeleton(novoModel);   // boneMap/bindPose/bones do esqueleto NOVO
+
+      this._createMixer();
+
+      // Se o .glb do traje trouxer clipes embutidos e ainda não existir um
+      // clip com esse nome, aproveita (Avaturn normalmente exporta sem animação).
+      (gltf.animations || []).forEach((clip) => {
+        const key = clip.name?.toLowerCase();
+        if (key && !this.rawClips[key]) this.rawClips[key] = clip;
+      });
+
+      // --- 3. Reconstrói TODAS as actions a partir dos clips crus ---
+      // O retarget precisa rodar de novo: as tracks de hips.position foram
+      // rebaseadas na pose de repouso do esqueleto ANTIGO.
+      for (const [name, rawClip] of Object.entries(this.rawClips)) {
+        this._createAction(name, rawClip);
+      }
+
+      this.currentOutfitKey = modeloKey;
+
+      // --- 4. Devolve a personagem ao estado de animação correto ---
+      this.isSpecialActionPlaying = false;
+      this.isStunned = false;
+      this.idleTimer = 0;
+      this._resumeAnimationState();
+
+      this.ready = true;
+      this.playTrigger('victory'); // comemoração da roupa nova (opcional)
+    } catch (err) {
+      console.error('[CharacterController] Falha no hot-swap de traje:', err);
+      this.ready = true; // não deixa o player travado se o load falhar
+    } finally {
+      this.isSwapping = false;
+    }
+  }
+
+  // Sai da T-Pose imediatamente após o swap, respeitando o que o jogador faz.
+  _resumeAnimationState() {
+    if (this.isMoving) {
+      const target = this.isRunning && this.actions['run'] ? 'run' : 'walk';
+      if (this.actions[target]) {
+        this.fadeTo(target, 0.0);
+        return;
+      }
+    }
+
+    if (this.actions['idle']) {
+      this.fadeTo('idle', 0.0);
+      return;
+    }
+
+    this._applyRestPose(); // fallback: pose de repouso com os braços baixados
+  }
+
+  _disposeModel(model) {
+    if (!model) return;
+
+    model.traverse((child) => {
+      if (child.isSkinnedMesh && child.skeleton?.dispose) {
+        child.skeleton.dispose();
+      }
+      if (child.isMesh) {
+        child.geometry?.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((mat) => {
+          if (!mat) return;
+          Object.values(mat).forEach((value) => {
+            if (value && value.isTexture) value.dispose();
+          });
+          mat.dispose();
+        });
+      }
+    });
+  }
+
+  // =========================================================================
+  // MÁQUINA DE ESTADOS / LOOP
+  // =========================================================================
+
   fadeTo(targetName, duration = 0.2) {
     if (this.currentActionName === targetName) return;
 
@@ -300,10 +488,10 @@ export class CharacterController {
   }
 
   playTrigger(actionName) {
-    if (this.isStunned) return;
+    if (this.isStunned || this.isSwapping) return;
 
     if (actionName === 'dance') {
-      const dances = ['dance_macarena', 'hiphop'].filter(d => this.actions[d]);
+      const dances = ['dance_macarena', 'hiphop'].filter((d) => this.actions[d]);
       if (dances.length > 0) {
         actionName = dances[this.danceIndex % dances.length];
         this.danceIndex++;
@@ -311,7 +499,7 @@ export class CharacterController {
     }
 
     if (!this.actions[actionName]) return;
-    
+
     this.isSpecialActionPlaying = true;
     this.fadeTo(actionName, 0.15);
   }
@@ -340,7 +528,7 @@ export class CharacterController {
 
     this.velocity.set(dirX, 0, dirZ);
     if (this.velocity.lengthSq() > 1) this.velocity.normalize();
-    
+
     this.isMoving = this.velocity.lengthSq() > 0.0001;
     this.isRunning = isRunning && this.isMoving;
 
@@ -351,7 +539,7 @@ export class CharacterController {
   }
 
   update(delta) {
-    if (!this.ready) return;
+    if (!this.ready || this.isSwapping) return;
 
     if (this.isStunned) {
       this.body.velocity.set(0, 0, 0);
@@ -369,7 +557,7 @@ export class CharacterController {
     if (this.isMoving) {
       const targetRot = Math.atan2(this.velocity.x, this.velocity.z);
       let diff = targetRot - this.group.rotation.y;
-      
+
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       this.group.rotation.y += diff * Math.min(delta * 12, 1);
     }
@@ -387,11 +575,16 @@ export class CharacterController {
         if (this.idleTimer > 10 && this.actions['idle_dwarf']) {
           this.fadeTo('idle_dwarf', 0.3);
         } else if (this.idleTimer <= 10) {
-          if (this.currentActionName) {
-            this.actions[this.currentActionName].fadeOut(0.2);
-            this.currentActionName = null;
+          if (this.actions['idle']) {
+            // Se existir um clip de respiração, ele é melhor que a pose estática.
+            this.fadeTo('idle', 0.2);
+          } else {
+            if (this.currentActionName) {
+              this.actions[this.currentActionName].fadeOut(0.2);
+              this.currentActionName = null;
+            }
+            this._applyRestPose();
           }
-          this._applyRestPose();
         }
       }
     }

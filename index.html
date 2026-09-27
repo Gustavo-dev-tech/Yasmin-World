@@ -8,6 +8,7 @@
 </head>
 <body>
 
+    <!-- MENU PRINCIPAL -->
     <div id="main-menu" class="menu-overlay">
         <div class="menu-card">
             <h1 class="game-title">REINO DE DRAGÕES</h1>
@@ -21,6 +22,31 @@
         </div>
     </div>
 
+    <!-- TELA DE ESCOLHA DE PERSONAGEM (Fora do main-menu para não sumir junto) -->
+    <div id="character-select-menu" class="menu-overlay hidden">
+        <div class="menu-card" style="max-width: 550px;">
+            <h2 class="game-title" style="font-size: 2rem;">Escolha seu Herói</h2>
+            <p class="game-subtitle">Quem irá explorar o Reino de Dragões?</p>
+
+            <div style="display: flex; gap: 20px; justify-content: center; margin-top: 20px;">
+                <!-- Card Yasmin -->
+                <button class="char-card" onclick="window.selectCharacter('padrao')">
+                    <img src="./assets/photos/yasmin.png" alt="Yasmin" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <h3>YASMIN</h3>
+                </button>
+                
+                <!-- Card Gustavo -->
+                <button class="char-card" onclick="window.selectCharacter('gustavo')">
+                    <img src="./assets/photos/gustavo.png" alt="Gustavo" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <h3>GUSTAVO</h3>
+                </button>
+            </div>
+            
+            <button id="btn-back-menu" class="btn-secondary" style="margin-top: 25px;" onclick="document.getElementById('character-select-menu').classList.add('hidden'); document.getElementById('main-menu').classList.remove('hidden');">VOLTAR</button>
+        </div>
+    </div>
+
+    <!-- MENU DE PAUSE -->
     <div id="pause-menu" class="menu-overlay hidden">
         <div class="menu-card">
             <h1 class="game-title">JOGO PAUSADO</h1>
@@ -90,6 +116,46 @@
         </div>
     </div>
 
+    <!-- LOJA DE ROUPAS COM IMAGENS -->
+    <div id="shop-ui" class="hidden">
+        <div class="shop-card">
+            <h2 class="shop-title">🏪 Loja do Reino</h2>
+            <p class="shop-subtitle">Use Touch, Mouse ou Setas para escolher.</p>
+            
+            <div class="shop-items">
+                <!-- ITEM 1: Roupa Padrão -->
+                <button class="shop-btn" onclick="window.comprarRoupa('padrao', 0)">
+                    <div style="width: 60px; height: 60px; background: #444; border-radius: 8px; border: 1px solid #555; display:flex; align-items:center; justify-content:center; font-size:24px;">🔄</div>
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Roupa Padrão</span>
+                        <span class="shop-item-price" style="background:#888; color:white;">Grátis</span>
+                    </div>
+                </button>
+                
+                <!-- ITEM 2: Vestido Branco -->
+                <button class="shop-btn" onclick="window.comprarRoupa('vestido_branco', 0)">
+                    <img src="./assets/photos/vestido_branco.png" class="shop-item-img" alt="Vestido Branco" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Vestido Branco</span>
+                        <span class="shop-item-price">$ 0</span>
+                    </div>
+                </button>
+
+                <!-- ITEM 3: Conjunto Rosa -->
+                <button class="shop-btn" onclick="window.comprarRoupa('rosa', 150)">
+                    <img src="./assets/photos/rosa.png" class="shop-item-img" alt="Conjunto Rosa" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Conjunto Estrelado</span>
+                        <span class="shop-item-price">$ 150</span>
+                    </div>
+                </button>
+            </div>
+
+            <p id="shop-feedback"></p>
+            <button id="btn-close-shop" class="btn-danger" onclick="window.fecharLoja()">SAIR (Botão B)</button>
+        </div>
+    </div>
+
     <div id="debug-panel" class="hidden"></div>
     <div id="joystick-zone"></div>
 
@@ -122,6 +188,25 @@
       }
     }
     </script>
+
+    <!-- Lógica de Compra da Loja -->
+    <script>
+        window.comprarRoupa = function(modelo, preco) {
+            if (window.gameDinheiro === undefined) window.gameDinheiro = 0;
+            
+            if (window.gameDinheiro >= preco) {
+                window.gameDinheiro -= preco;
+                document.getElementById('money-display').innerText = '$' + window.gameDinheiro.toString().padStart(7, '0');
+                window.dispatchEvent(new CustomEvent('roupaComprada', { detail: modelo }));
+            } else {
+                const feedback = document.getElementById('shop-feedback');
+                feedback.style.color = '#ff4444';
+                feedback.innerText = "Dinheiro insuficiente!";
+                setTimeout(() => { feedback.innerText = ""; feedback.style.color = '#00ff00'; }, 2000);
+            }
+        };
+    </script>
+
     <script type="module" src="src/main.js"></script>
 </body>
 </html>
