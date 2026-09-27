@@ -65,8 +65,8 @@ const world = new World({ scene, physics });
 // Oceano com Batimetria 3D cercando o continente do jogo
 const water = new WaterSystem({
   scene,
-  landSize: 1000,
-  oceanSize: 2600,
+  landSize: 250,
+  oceanSize: 600,
   resolution: 48
 });
 
@@ -201,3 +201,5 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+//water

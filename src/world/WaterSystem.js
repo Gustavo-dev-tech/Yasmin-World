@@ -3,8 +3,8 @@ import * as THREE from 'three';
 export class WaterSystem {
   constructor({
     scene,
-    landSize = 1000,
-    oceanSize = 2600,
+    landSize = 250,
+    oceanSize = 600,
     resolution = 48,
     landSegments = 3,
     biasPower = 2.4,
@@ -662,3 +662,5 @@ export class WaterSystem {
     }
   }
 }
+
+//landSize = 250, oceanSize = 600

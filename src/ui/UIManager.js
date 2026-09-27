@@ -17,6 +17,7 @@ export class UIManager {
 
     this.isGameStarted = false;
     this.lastPadTime = 0;
+    this.currentCharacterId = 'yasmin'; // Yasmin já é carregada por padrão no boot
 
     // Elementos do DOM
     this.uiContainer = document.getElementById('ui-container');
@@ -31,6 +32,7 @@ export class UIManager {
     if (this.uiContainer) this.uiContainer.classList.add('hidden');
     if (this.actionsPanel) this.actionsPanel.classList.add('hidden');
 
+    this._initTopLoadingBar();
     this._initMenus();
     this._initWaterGUI();
     this._bindEvents();
@@ -38,6 +40,79 @@ export class UIManager {
 
   get isPaused() {
     return this.pauseMenu ? this.pauseMenu.isPaused : false;
+  }
+
+  // =========================================================================
+  // BARRA DE CARREGAMENTO SUPERIOR (SEM DESCRIÇÃO / APENAS VISUAL)
+  // =========================================================================
+  _initTopLoadingBar() {
+    const barContainer = document.createElement('div');
+    barContainer.id = 'top-loading-bar-container';
+    barContainer.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 255, 255, 0.08);
+      z-index: 99999;
+      pointer-events: none;
+      transition: opacity 0.5s ease;
+      opacity: 1;
+    `;
+
+    const barFill = document.createElement('div');
+    barFill.id = 'top-loading-bar-fill';
+    barFill.style.cssText = `
+      width: 5%;
+      height: 100%;
+      background: linear-gradient(90deg, #00f2fe 0%, #4facfe 50%, #ffd700 100%);
+      box-shadow: 0 0 12px rgba(79, 172, 254, 0.9), 0 0 6px rgba(255, 215, 0, 0.8);
+      transition: width 0.25s ease-out;
+    `;
+
+    barContainer.appendChild(barFill);
+    document.body.appendChild(barContainer);
+
+    this.loadingBarContainer = barContainer;
+    this.loadingBarFill = barFill;
+    this.isWorldLoaded = false;
+
+    // Monitora automaticamente todos os modelos GLB, FBX e texturas do Three.js
+    THREE.DefaultLoadingManager.onStart = () => {
+      this.showLoadingBar(15);
+    };
+
+    THREE.DefaultLoadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
+      if (itemsTotal > 0) {
+        const pct = Math.min(100, Math.max(8, (itemsLoaded / itemsTotal) * 100));
+        this.showLoadingBar(pct);
+      }
+    };
+
+    THREE.DefaultLoadingManager.onLoad = () => {
+      this.isWorldLoaded = true;
+      this.showLoadingBar(100);
+      setTimeout(() => {
+        if (this.loadingBarContainer) {
+          this.loadingBarContainer.style.opacity = '0';
+        }
+      }, 450);
+    };
+  }
+
+  showLoadingBar(percent) {
+    if (!this.loadingBarContainer || !this.loadingBarFill) return;
+    this.loadingBarContainer.style.opacity = '1';
+    this.loadingBarFill.style.width = `${percent}%`;
+  }
+
+  hideLoadingBar() {
+    if (!this.loadingBarContainer || !this.loadingBarFill) return;
+    this.loadingBarFill.style.width = '100%';
+    setTimeout(() => {
+      this.loadingBarContainer.style.opacity = '0';
+    }, 350);
   }
 
   _initMenus() {
@@ -69,15 +144,30 @@ export class UIManager {
     this.waterGui.close();
   }
 
+  // Aguarda o modelo base terminar de carregar caso o usuário clique muito rápido no menu
+  async _waitForPlayerReady() {
+    if (this.player && this.player.ready) return;
+    this.showLoadingBar(65);
+    await new Promise((resolve) => {
+      const check = setInterval(() => {
+        if (this.player && this.player.ready) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 60);
+    });
+  }
+
   _bindEvents() {
-    // Evento de compra/equipamento na Loja
     window.addEventListener('roupaComprada', async (e) => {
       const outfit = e.detail;
       if (this.player && this.player.ready) {
         const feedback = document.getElementById('shop-feedback');
         if (feedback) feedback.innerText = 'Equipando...';
 
+        this.showLoadingBar(40);
         await this.player.changeOutfit(outfit);
+        this.hideLoadingBar();
 
         if (feedback) {
           feedback.innerText = 'Item equipado!';
@@ -87,7 +177,6 @@ export class UIManager {
       }
     });
 
-    // Botões de Montar, Pilotar e Farol
     if (this.btnMount) {
       this.btnMount.addEventListener('click', () => {
         if (this.dragon && !this.moto.isMounted) {
@@ -112,9 +201,8 @@ export class UIManager {
       });
     }
 
-    // Atalhos de Teclado Unificados (G = GUI da Água, E = Subir na Moto, F = Farol)
     window.addEventListener('keydown', (e) => {
-      const key = e.key.toLowerCase();
+      const key = (e.key || '').toLowerCase();
 
       if (key === 'g' && this.waterGui) {
         this.waterGui._hidden ? this.waterGui.show() : this.waterGui.hide();
@@ -136,14 +224,25 @@ export class UIManager {
       }
     });
 
-    // Funções Globais chamadas pelo HTML (Escolha de Personagem e Botões de Dança)
+    // Seleção de Personagem Otimizada (Sem recarregar a Yasmin duas vezes!)
     window.selectCharacter = async (charId) => {
+      const targetChar = (charId || 'yasmin').toLowerCase();
+
+      // Garante que o carregamento inicial em segundo plano terminou
+      await this._waitForPlayerReady();
+
+      // Só chama changeOutfit se o jogador escolheu um personagem DIFERENTE do que já está na cena
+      if (targetChar !== this.currentCharacterId) {
+        this.showLoadingBar(50);
+        await this.player.changeOutfit(targetChar);
+        this.currentCharacterId = targetChar;
+        this.hideLoadingBar();
+      } else {
+        this.hideLoadingBar();
+      }
+
       if (this.charSelectDiv) this.charSelectDiv.classList.add('hidden');
       if (this.mainMenuDiv) this.mainMenuDiv.classList.add('hidden');
-
-      if (this.player && this.player.ready) {
-        await this.player.changeOutfit(charId);
-      }
 
       this.isGameStarted = true;
       this.pauseMenu.canPause = true;
@@ -151,7 +250,9 @@ export class UIManager {
       if (this.uiContainer) this.uiContainer.classList.remove('hidden');
       if (this.actionsPanel) this.actionsPanel.classList.remove('hidden');
 
-      console.log(`[Game] Jogo Iniciado com: ${charId.toUpperCase()}!`);
+      // Garante o foco da janela para receber comandos de teclado (especialmente via AnyDesk)
+      window.focus();
+      console.log(`[Game] Jogo Iniciado com: ${targetChar.toUpperCase()}!`);
     };
 
     window.triggerAnim = (animName) => {
@@ -162,7 +263,6 @@ export class UIManager {
     };
   }
 
-  // Atualiza Controle Xbox (Loja, Câmera e Botões X/Y)
   updateGamepad(elapsed, activePlayerPos) {
     const padState = this.input.getGamepadState();
     if (!padState || !this.isGameStarted || this.isPaused) return;
@@ -213,13 +313,11 @@ export class UIManager {
     }
   }
 
-  // Atualiza visibilidade dos botões de Montar, Pilotar, Farol e Dançar
   updateHUDButtons(activePlayerPos) {
     const actionBtns = this.actionsPanel
       ? this.actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-ride):not(#btn-headlight):not(#btn-pause)')
       : [];
 
-    // 1. Botão do Dragão
     if (this.dragon && this.dragon.isLoaded && this.btnMount) {
       const distDragon = activePlayerPos.distanceTo(this.dragon.group.position);
       if (this.dragon.isMounted) {
@@ -233,7 +331,6 @@ export class UIManager {
       }
     }
 
-    // 2. Botões da Moto (Pilotar + Farol LED)
     if (this.moto && this.moto.isLoaded && this.btnRide) {
       const distMoto = activePlayerPos.distanceTo(this.moto.group.position);
       if (this.moto.isMounted) {
@@ -254,7 +351,6 @@ export class UIManager {
       }
     }
 
-    // 3. Botões de Dançar/Comemorar
     if (this.dragon.isMounted || this.moto.isMounted) {
       actionBtns.forEach((btn) => btn.classList.add('hidden'));
     } else {

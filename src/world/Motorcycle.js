@@ -87,7 +87,7 @@ export class Motorcycle {
   }
 
   // =========================================================================
-  // SISTEMA DE FAROL DE LED BRANCO + FEIXE VOLUMÉTRICO + LANTERNA TRASEIRA
+  // SISTEMA DE FAROL DE LED BRANCO (+Z FRENTE) E LANTERNA TRASEIRA (-Z TRÁS)
   // =========================================================================
   _createLightFlareTexture() {
     const size = 128;
@@ -106,27 +106,27 @@ export class Motorcycle {
 
   _buildHeadlightSystem() {
     this.headlightGroup = new THREE.Group();
-    // Posição exata do bloco óptico dianteiro da Twister 300 (frente aponta para -Z)
-    this.headlightGroup.position.set(0, 0.78, -0.82);
+    // Posicionado no bloco óptico DIANTEIRO (+Z)
+    this.headlightGroup.position.set(0, 0.78, 0.82);
     this.leanGroup.add(this.headlightGroup);
 
-    // 1. SpotLight Principal (Feixe de luz branca real que ilumina o cenário à frente)
+    // 1. SpotLight Principal apontando para a frente (+Z)
     this.spotLight = new THREE.SpotLight(0xf5faff, 0, 75, Math.PI / 4.2, 0.45, 1.3);
     this.spotLight.position.set(0, 0, 0);
-    this.spotLight.castShadow = false; // Evita peso extra na GPU mobile
+    this.spotLight.castShadow = false;
 
     this.spotTarget = new THREE.Object3D();
-    this.spotTarget.position.set(0, -0.62, -16.0);
+    this.spotTarget.position.set(0, -0.62, 16.0);
     this.headlightGroup.add(this.spotTarget);
     this.spotLight.target = this.spotTarget;
     this.headlightGroup.add(this.spotLight);
 
-    // 2. Luz curta de presença no farol (ilumina o para-lama dianteiro e o chão imediato)
+    // 2. Luz curta de presença no farol dianteiro
     this.bulbLight = new THREE.PointLight(0xffffff, 0, 4.5, 2.0);
-    this.bulbLight.position.set(0, 0, -0.08);
+    this.bulbLight.position.set(0, 0, 0.08);
     this.headlightGroup.add(this.bulbLight);
 
-    // 3. Brilho óptico na lente do farol (Flare Sprite)
+    // 3. Brilho óptico na lente dianteira (Flare Sprite)
     const flareTex = this._createLightFlareTexture();
     this.headlightFlare = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -140,16 +140,15 @@ export class Motorcycle {
       })
     );
     this.headlightFlare.scale.set(0.65, 0.65, 1);
-    this.headlightFlare.position.set(0, 0, -0.05);
+    this.headlightFlare.position.set(0, 0, 0.05);
     this.headlightGroup.add(this.headlightFlare);
 
-    // 4. Cone Volumétrico Suave (Feixe de luz visível no ar/neblina)
+    // 4. Cone Volumétrico abrindo para a frente (+Z)
     const coneLength = 14.0;
     const coneRadius = 3.2;
     const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 24, 1, true);
-    // Gira o cone para que o bico fique no farol (0,0,0) e a base se abra para a frente (-Z)
     coneGeo.translate(0, -coneLength / 2, 0);
-    coneGeo.rotateX(Math.PI / 2);
+    coneGeo.rotateX(-Math.PI / 2); // Abre o feixe na direção +Z (frente)
 
     this.lightBeamMesh = new THREE.Mesh(
       coneGeo,
@@ -162,10 +161,10 @@ export class Motorcycle {
         blending: THREE.AdditiveBlending
       })
     );
-    this.lightBeamMesh.rotation.x = -0.04; // Levemente inclinado para a pista
+    this.lightBeamMesh.rotation.x = 0.04; // Levemente inclinado para o asfalto à frente
     this.headlightGroup.add(this.lightBeamMesh);
 
-    // 5. Lanterna Traseira / Luz de Freio (Vermelha)
+    // 5. Lanterna Traseira / Luz de Freio Vermelha na rabeta (-Z)
     this.tailLightSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: flareTex,
@@ -177,7 +176,7 @@ export class Motorcycle {
         fog: false
       })
     );
-    this.tailLightSprite.position.set(0, 0.84, 0.92);
+    this.tailLightSprite.position.set(0, 0.84, -0.92);
     this.tailLightSprite.scale.set(0.35, 0.25, 1);
     this.leanGroup.add(this.tailLightSprite);
 
@@ -261,7 +260,7 @@ export class Motorcycle {
       }
 
       this.isLoaded = true;
-      console.log('[Motorcycle] Honda Twister 300 pronta com pose e farol LED!');
+      console.log('[Motorcycle] Honda Twister 300 pronta com luzes e direção corrigidas!');
     } catch (err) {
       console.error('[Motorcycle] Erro ao carregar moto_twister_300.glb:', err);
     }
@@ -402,8 +401,7 @@ export class Motorcycle {
   update(delta, player, input, dayNight = null) {
     if (!this.isLoaded) return;
 
-    // Automação inteligente do farol: acende sozinho ao anoitecer ou chover,
-    // mas permite que o jogador ligue/desligue manualmente a qualquer momento!
+    // Sensor crepuscular automático (noite ou chuva)
     if (dayNight) {
       const isEnvDark = Boolean(
         (dayNight.isNight && dayNight.isNight()) ||
@@ -425,13 +423,14 @@ export class Motorcycle {
       const { forward, right, isRunning } = input.getMovement();
       const currentMaxSpeed = isRunning ? this.boostSpeed : this.maxSpeed;
 
-      // Acende a luz de freio traseira mais forte quando aperta S (forward < -0.05)
+      // Luz de freio traseira mais forte ao apertar S / puxar joystick para trás
       const isBraking = forward < -0.05;
       if (this.tailLightSprite) {
         this.tailLightSprite.material.opacity = isBraking ? 1.0 : (this.headlightOn ? 0.65 : 0.0);
         this.tailLightSprite.scale.setScalar(isBraking ? 0.48 : 0.35);
       }
 
+      // 1. Aceleração (W / Touch Cima -> forward > 0) e Freio/Ré (S / Touch Baixo -> forward < 0)
       if (forward > 0.05) {
         this.speed += forward * this.acceleration * delta;
       } else if (forward < -0.05) {
@@ -450,6 +449,7 @@ export class Motorcycle {
 
       this.speed = THREE.MathUtils.clamp(this.speed, this.maxReverseSpeed, currentMaxSpeed);
 
+      // 2. Curva (A = esquerda, D = direita) e Inclinação (Lean)
       const speedFactor = Math.min(Math.abs(this.speed) / 8.0, 1.0);
       const reverseDir = this.speed >= 0 ? 1 : -1;
 
@@ -461,9 +461,10 @@ export class Motorcycle {
       this.currentLean = THREE.MathUtils.lerp(this.currentLean, targetLean, delta * 8);
       this.leanGroup.rotation.z = this.currentLean;
 
+      // 3. Deslocamento na direção +Z local (Frente real da moto e da personagem!)
       const moveDist = this.speed * delta;
-      this.group.position.x -= Math.sin(this.group.rotation.y) * moveDist;
-      this.group.position.z -= Math.cos(this.group.rotation.y) * moveDist;
+      this.group.position.x += Math.sin(this.group.rotation.y) * moveDist;
+      this.group.position.z += Math.cos(this.group.rotation.y) * moveDist;
 
       player.group.position.set(this.cfg.seatX, this.cfg.seatY, this.cfg.seatZ);
       player.group.rotation.set(0, this.cfg.riderYaw, 0);
@@ -488,7 +489,7 @@ export class Motorcycle {
         if (this.model) this.model.position.copy(this.modelBasePos);
       } else if (this.wheelMeshes.length > 0) {
         this.wheelMeshes.forEach((w) => {
-          w.rotation.x -= (this.speed / 0.32) * delta;
+          w.rotation.x += (this.speed / 0.32) * delta;
         });
       }
     }
