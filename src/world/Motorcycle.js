@@ -1,24 +1,35 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// Coordenadas definidas como novo padrão
-const DEFAULT_RIDER_CONFIG = {
-  bikeScale: 1.00,   // Multiplicador de tamanho da moto (ex: 1.15 deixa 15% maior)
+// Pose definitiva calibrada para a Honda Twister 300
+const FINAL_RIDER_CONFIG = {
+  bikeScale: 1.00,
   seatX: 0.00,
   seatY: 0.04,
   seatZ: -0.22,
   riderYaw: 0.01,
-  spinePitch: 0.30,
-  armDown: 1.18,
-  armForward: 0.34,
-  armTwist: 0.46,
-  elbowBend: -0.62,
-  thighLift: 1.20,
+  thighLift: 1.18,
   thighSpread: 0.30,
-  thighTwist: -0.56,
-  kneeBend: -1.00,
-  anklePitch: 0.00,  // Inclinação do pé/tornozelo na pedaleira
-  modelYawOffset: 4.7124
+  thighTwist: -0.08,
+  kneeBend: -1.90,
+  anklePitch: 0.46,
+  modelYawOffset: 4.7124,
+  spinePitch: 0.24,
+  headPitch: -0.26,
+  shoulderFwd: -0.14,
+  armDown: 1.04,
+  armForward: 0.46,
+  armTwist: 0.44,
+  elbowBend: -0.68,
+  forearmTwist: -0.72,
+  wristPitch: 0.00,
+  wristYaw: 0.00,
+  wristRoll: 0.00,
+  gripCurlX: 1.06,
+  gripCurlZ: 0.00,
+  leverFingers: 0.00,
+  thumbCurl: 0.32,
+  thumbSpread: -0.80
 };
 
 export class Motorcycle {
@@ -64,140 +75,10 @@ export class Motorcycle {
     this.turnSpeed = 2.4;
     this.currentLean = 0;
 
-    // Configuração carregada com os seus valores padrão
-    this.cfg = { ...DEFAULT_RIDER_CONFIG };
+    this.cfg = { ...FINAL_RIDER_CONFIG };
     this.modelYawOffset = this.cfg.modelYawOffset;
-    this.tunerPanel = null;
 
-    this._createTunerUI();
     this._loadModel();
-  }
-
-  // Painel visual com limites ampliados em +2 / -2 pontos e novos ajustes
-  _createTunerUI() {
-    const panel = document.createElement('div');
-    panel.id = 'moto-tuner-panel';
-    panel.style.cssText = `
-      display: none;
-      position: fixed;
-      top: 12px;
-      left: 12px;
-      width: 300px;
-      max-height: 88vh;
-      overflow-y: auto;
-      background: rgba(15, 23, 42, 0.92);
-      border: 2px solid #ffd700;
-      border-radius: 12px;
-      padding: 12px;
-      color: #fff;
-      font-family: monospace;
-      font-size: 12px;
-      z-index: 2000;
-      pointer-events: auto;
-      touch-action: pan-y;
-    `;
-
-    ['pointerdown', 'pointermove', 'pointerup', 'wheel'].forEach((evt) => {
-      panel.addEventListener(evt, (e) => e.stopPropagation());
-    });
-
-    // Todos os limites foram expandidos em +2 / -2 pontos
-    const controls = [
-      { key: 'bikeScale', label: 'Tamanho da Moto (Escala)', min: 0.5, max: 3.0, step: 0.02 },
-      { key: 'seatY', label: 'Banco Altura (Y)', min: -2.8, max: 2.8, step: 0.01 },
-      { key: 'seatZ', label: 'Banco Frente/Trás (Z)', min: -2.9, max: 2.9, step: 0.01 },
-      { key: 'seatX', label: 'Banco Esq/Dir (X)', min: -2.4, max: 2.4, step: 0.01 },
-      { key: 'riderYaw', label: 'Giro Corpo (Yaw)', min: -5.14, max: 5.14, step: 0.05 },
-      { key: 'spinePitch', label: 'Tronco Inclinar', min: -3.2, max: 3.2, step: 0.02 },
-      { key: 'armDown', label: 'Braço Descer (Z)', min: -4.0, max: 4.0, step: 0.02 },
-      { key: 'armForward', label: 'Braço Frente (X)', min: -4.0, max: 4.0, step: 0.02 },
-      { key: 'armTwist', label: 'Braço Fechar (Y)', min: -4.0, max: 4.0, step: 0.02 },
-      { key: 'elbowBend', label: 'Cotovelo Dobrar', min: -4.0, max: 4.0, step: 0.02 },
-      { key: 'thighLift', label: 'Coxa Subir (X)', min: -4.2, max: 3.2, step: 0.02 },
-      { key: 'thighSpread', label: 'Coxa Abrir (Z)', min: -3.4, max: 3.4, step: 0.02 },
-      { key: 'thighTwist', label: 'Coxa Girar (Y)', min: -3.4, max: 3.4, step: 0.02 },
-      { key: 'kneeBend', label: 'Joelho Dobrar (X)', min: -3.5, max: 4.5, step: 0.02 },
-      { key: 'anklePitch', label: 'Pé Inclinar (X)', min: -3.0, max: 3.0, step: 0.02 }
-    ];
-
-    let html = `
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-        <strong style="color:#ffd700; font-size:13px;">🏍️ Editor de Pose da Moto</strong>
-        <button id="btn-rotate-moto-mesh" style="padding:4px 8px; font-size:11px; background:#334155; color:#fff; border:1px solid #ffd700; border-radius:6px; cursor:pointer;">Girar Moto 90°</button>
-      </div>
-    `;
-
-    controls.forEach((c) => {
-      const val = this.cfg[c.key];
-      html += `
-        <div style="margin-bottom:6px;">
-          <div style="display:flex; justify-content:space-between;">
-            <span>${c.label}</span>
-            <span id="val-${c.key}" style="color:#34d399;">${val.toFixed(2)}</span>
-          </div>
-          <input type="range" id="slider-${c.key}" min="${c.min}" max="${c.max}" step="${c.step}" value="${val}" style="width:100%; cursor:pointer;">
-        </div>
-      `;
-    });
-
-    html += `
-      <button id="btn-log-moto-cfg" style="width:100%; margin-top:8px; padding:8px; background:#22c55e; color:#000; font-weight:bold; border:none; border-radius:6px; cursor:pointer; font-size:12px;">
-        📋 Gerar Log no Console (F12)
-      </button>
-    `;
-
-    panel.innerHTML = html;
-    document.body.appendChild(panel);
-    this.tunerPanel = panel;
-
-    controls.forEach((c) => {
-      const slider = panel.querySelector(`#slider-${c.key}`);
-      const valSpan = panel.querySelector(`#val-${c.key}`);
-
-      slider.addEventListener('input', (e) => {
-        const num = parseFloat(e.target.value);
-        this.cfg[c.key] = num;
-        valSpan.innerText = num.toFixed(2);
-
-        if (c.key === 'bikeScale') {
-          this.meshWrapper.scale.setScalar(this.cfg.bikeScale);
-        }
-
-        if (this.isMounted && this.player) {
-          this.player.group.position.set(this.cfg.seatX, this.cfg.seatY, this.cfg.seatZ);
-          this.player.group.rotation.set(0, this.cfg.riderYaw, 0);
-          this._applyRiderPose(this.player, true);
-        }
-      });
-
-      slider.addEventListener('change', () => this.logCurrentConfig());
-    });
-
-    panel.querySelector('#btn-rotate-moto-mesh').addEventListener('click', () => {
-      this.modelYawOffset = (this.modelYawOffset + Math.PI / 2) % (Math.PI * 2);
-      this.cfg.modelYawOffset = this.modelYawOffset;
-      this.meshWrapper.rotation.y = this.modelYawOffset;
-      this.logCurrentConfig();
-    });
-
-    panel.querySelector('#btn-log-moto-cfg').addEventListener('click', () => {
-      this.logCurrentConfig(true);
-    });
-  }
-
-  logCurrentConfig(copyToClipboard = false) {
-    const cleanCfg = {};
-    for (const [k, v] of Object.entries(this.cfg)) {
-      cleanCfg[k] = Number(v.toFixed(2));
-    }
-    cleanCfg.modelYawOffset = Number(this.modelYawOffset.toFixed(4));
-
-    const jsonStr = JSON.stringify(cleanCfg, null, 2);
-    console.log('%c[MOTO POSE CONFIG - COPIE E ENVIE ABAIXO]:\n' + jsonStr, 'color: #ffd700; font-weight: bold;');
-
-    if (copyToClipboard && navigator.clipboard) {
-      navigator.clipboard.writeText(jsonStr).catch(() => {});
-    }
   }
 
   async _loadModel() {
@@ -223,7 +104,6 @@ export class Motorcycle {
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
 
-      // Aplica a rotação e escala salvas na configuração padrão
       this.meshWrapper.rotation.y = this.modelYawOffset;
       this.meshWrapper.scale.setScalar(this.cfg.bikeScale);
 
@@ -254,7 +134,7 @@ export class Motorcycle {
       }
 
       this.isLoaded = true;
-      console.log('[Motorcycle] Honda Twister 300 carregada com sucesso!');
+      console.log('[Motorcycle] Honda Twister 300 pronta com pose calibrada!');
     } catch (err) {
       console.error('[Motorcycle] Erro ao carregar moto_twister_300.glb:', err);
     }
@@ -278,10 +158,7 @@ export class Motorcycle {
         player.mixer.stopAllAction();
       }
       this._applyRiderPose(player, true);
-
-      if (this.tunerPanel) this.tunerPanel.style.display = 'block';
     } else {
-      if (this.tunerPanel) this.tunerPanel.style.display = 'none';
       this._applyRiderPose(player, false);
 
       const dismountPos = this.group.position.clone();
@@ -334,47 +211,62 @@ export class Motorcycle {
         .replace(/[^a-z0-9]/g, '');
 
       const baseQuat = bindPose.get(child).clone();
+      const isLeft = clean.includes('left') || clean.startsWith('l') || clean.endsWith('l');
+      const sideSign = isLeft ? 1 : -1;
 
-      // Tronco e Cabeça
-      if (clean === 'spine' || clean === 'spine1' || clean === 'spine01') {
+      // 1. Tronco, Cabeça e Ombros
+      if (clean === 'spine' || clean === 'spine1' || clean === 'spine01' || clean === 'spine2' || clean === 'spine02') {
         child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.spinePitch));
       } else if (clean === 'neck' || clean === 'head') {
-        child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, -c.spinePitch * 0.6));
+        child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.headPitch));
+      } else if (clean === 'leftshoulder' || clean === 'rightshoulder') {
+        child.quaternion.copy(baseQuat).multiply(q(0, 1, 0, c.shoulderFwd * sideSign));
       }
-      // Braços
-      else if (clean === 'leftarm') {
-        const downQ = q(0, 0, 1, c.armDown);
+
+      // 2. Braços e Antebraços
+      else if (clean === 'leftarm' || clean === 'rightarm') {
+        const downQ = q(0, 0, 1, c.armDown * sideSign);
         const fwdQ = q(1, 0, 0, c.armForward);
-        const twistQ = q(0, 1, 0, c.armTwist);
+        const twistQ = q(0, 1, 0, c.armTwist * sideSign);
         child.quaternion.copy(baseQuat).multiply(downQ).multiply(fwdQ).multiply(twistQ);
-      } else if (clean === 'rightarm') {
-        const downQ = q(0, 0, 1, -c.armDown);
-        const fwdQ = q(1, 0, 0, c.armForward);
-        const twistQ = q(0, 1, 0, -c.armTwist);
-        child.quaternion.copy(baseQuat).multiply(downQ).multiply(fwdQ).multiply(twistQ);
+      } else if (clean === 'leftforearm' || clean === 'rightforearm') {
+        const bendQ = q(1, 0, 0, c.elbowBend);
+        const twistQ = q(0, 1, 0, c.forearmTwist * sideSign);
+        child.quaternion.copy(baseQuat).multiply(bendQ).multiply(twistQ);
       }
-      // Cotovelos
-      else if (clean === 'leftforearm' || clean === 'rightforearm') {
-        child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.elbowBend));
+
+      // 3. Punhos / Mãos
+      else if (clean === 'lefthand' || clean === 'righthand') {
+        const pitchQ = q(1, 0, 0, c.wristPitch);
+        const yawQ = q(0, 0, 1, c.wristYaw * sideSign);
+        const rollQ = q(0, 1, 0, c.wristRoll * sideSign);
+        child.quaternion.copy(baseQuat).multiply(pitchQ).multiply(yawQ).multiply(rollQ);
       }
-      // Coxas
-      else if (clean === 'leftupleg') {
+
+      // 4. Dedos e Manetes
+      else if (clean.includes('thumb')) {
+        const curlQ = q(1, 0, 0, c.thumbCurl);
+        const spreadQ = q(0, 0, 1, c.thumbSpread * sideSign);
+        child.quaternion.copy(baseQuat).multiply(spreadQ).multiply(curlQ);
+      } else if (clean.includes('index') || clean.includes('middle')) {
+        const curlX = q(1, 0, 0, c.gripCurlX + c.leverFingers);
+        const curlZ = q(0, 0, 1, c.gripCurlZ * sideSign);
+        child.quaternion.copy(baseQuat).multiply(curlX).multiply(curlZ);
+      } else if (clean.includes('ring') || clean.includes('pinky') || clean.includes('little')) {
+        const curlX = q(1, 0, 0, c.gripCurlX);
+        const curlZ = q(0, 0, 1, c.gripCurlZ * sideSign);
+        child.quaternion.copy(baseQuat).multiply(curlX).multiply(curlZ);
+      }
+
+      // 5. Pernas e Pés
+      else if (clean === 'leftupleg' || clean === 'rightupleg') {
         const liftQ = q(1, 0, 0, c.thighLift);
-        const spreadQ = q(0, 0, 1, c.thighSpread);
-        const twistQ = q(0, 1, 0, c.thighTwist);
+        const spreadQ = q(0, 0, 1, c.thighSpread * sideSign);
+        const twistQ = q(0, 1, 0, c.thighTwist * sideSign);
         child.quaternion.copy(baseQuat).multiply(liftQ).multiply(spreadQ).multiply(twistQ);
-      } else if (clean === 'rightupleg') {
-        const liftQ = q(1, 0, 0, c.thighLift);
-        const spreadQ = q(0, 0, 1, -c.thighSpread);
-        const twistQ = q(0, 1, 0, -c.thighTwist);
-        child.quaternion.copy(baseQuat).multiply(liftQ).multiply(spreadQ).multiply(twistQ);
-      }
-      // Joelhos
-      else if (clean === 'leftleg' || clean === 'rightleg') {
+      } else if (clean === 'leftleg' || clean === 'rightleg') {
         child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.kneeBend));
-      }
-      // Tornozelos / Pés
-      else if (clean === 'leftfoot' || clean === 'rightfoot') {
+      } else if (clean === 'leftfoot' || clean === 'rightfoot') {
         child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.anklePitch));
       }
     });
