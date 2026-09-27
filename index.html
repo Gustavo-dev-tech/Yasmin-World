@@ -117,13 +117,14 @@
     </div>
 
     <!-- LOJA DE ROUPAS COM IMAGENS -->
+    <!-- LOJA DE ROUPAS E CAPACETES -->
     <div id="shop-ui" class="hidden">
         <div class="shop-card">
             <h2 class="shop-title">🏪 Loja do Reino</h2>
             <p class="shop-subtitle">Use Touch, Mouse ou Setas para escolher.</p>
             
             <div class="shop-items">
-                <!-- ITEM 1: Roupa Padrão -->
+                <!-- ROUPAS -->
                 <button class="shop-btn" onclick="window.comprarRoupa('padrao', 0)">
                     <div style="width: 60px; height: 60px; background: #444; border-radius: 8px; border: 1px solid #555; display:flex; align-items:center; justify-content:center; font-size:24px;">🔄</div>
                     <div class="shop-item-info">
@@ -132,21 +133,76 @@
                     </div>
                 </button>
                 
-                <!-- ITEM 2: Vestido Branco -->
                 <button class="shop-btn" onclick="window.comprarRoupa('vestido_branco', 0)">
                     <img src="./assets/photos/vestido_branco.png" class="shop-item-img" alt="Vestido Branco" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
                     <div class="shop-item-info">
                         <span class="shop-item-name">Vestido Branco</span>
-                        <span class="shop-item-price">$ 0</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
                     </div>
                 </button>
 
-                <!-- ITEM 3: Conjunto Rosa -->
                 <button class="shop-btn" onclick="window.comprarRoupa('rosa', 150)">
                     <img src="./assets/photos/rosa.png" class="shop-item-img" alt="Conjunto Rosa" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
                     <div class="shop-item-info">
                         <span class="shop-item-name">Conjunto Estrelado</span>
                         <span class="shop-item-price">$ 150</span>
+                    </div>
+                </button>
+
+                <!-- CAPACETES (CABEÇA) -->
+                <button class="shop-btn" onclick="window.comprarRoupa('remover_capacete', 0)">
+                    <div style="width: 60px; height: 60px; background: #444; border-radius: 8px; border: 1px solid #555; display:flex; align-items:center; justify-content:center; font-size:24px;">🚫</div>
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Sem Capacete</span>
+                        <span class="shop-item-price" style="background:#888; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_moto_iii', 0)">
+                    <img src="./assets/photos/cabeca/capacete_moto_iii.png" class="shop-item-img" alt="Capacete Moto III" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Moto III</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_vintage', 0)">
+                    <img src="./assets/photos/cabeca/capacete_vintage.png" class="shop-item-img" alt="Capacete Vintage" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Vintage</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_racing', 0)">
+                    <img src="./assets/photos/cabeca/capacete_racing.png" class="shop-item-img" alt="Capacete Racing" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Racing</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_off_road', 0)">
+                    <img src="./assets/photos/cabeca/capacete_off_road.png" class="shop-item-img" alt="Capacete Off-Road" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Off-Road</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_supertech_r10', 0)">
+                    <img src="./assets/photos/cabeca/capacete_supertech_r10.png" class="shop-item-img" alt="Capacete Supertech R10" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Supertech R10</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
+                    </div>
+                </button>
+
+                <button class="shop-btn" onclick="window.comprarRoupa('capacete_elementza', 0)">
+                    <img src="./assets/photos/cabeca/capacete_elementza.png" class="shop-item-img" alt="Capacete Elementza" onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='">
+                    <div class="shop-item-info">
+                        <span class="shop-item-name">Capacete Elementza</span>
+                        <span class="shop-item-price" style="background:#22c55e; color:white;">Grátis</span>
                     </div>
                 </button>
             </div>
@@ -159,8 +215,9 @@
     <div id="debug-panel" class="hidden"></div>
     <div id="joystick-zone"></div>
 
-    <div id="actions-panel">
+   <div id="actions-panel">
         <button id="btn-mount" class="btn-action hidden">🐉 Montar</button>
+        <button id="btn-ride" class="btn-action hidden">🏍️ Pilotar</button>
         <button id="btn-pause" class="btn-action">⏸️ Pause</button>
         <button class="btn-action" onclick="window.triggerAnim('dance')">✨ Dançar</button>
         <button class="btn-action" onclick="window.triggerAnim('victory')">🎉 Comemorar</button>
@@ -210,3 +267,5 @@
     <script type="module" src="src/main.js"></script>
 </body>
 </html>
+
+<div id="actions-panel"></div>

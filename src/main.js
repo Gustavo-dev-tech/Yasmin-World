@@ -2,12 +2,15 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { PhysicsWorld } from './physics/Physics.js';
 import { CharacterController } from './player/CharacterController.js';
+import { OrbitCameraRig } from './player/OrbitCameraRig.js';
+import { DayNightCycle } from './world/DayNightCycle.js';
 import { World } from './world/World.js';
 import { Castle } from './world/Castle.js'; 
 import { Escada } from './world/Escada.js';
 import { Animals } from './world/Animals.js';
 import { Collectibles } from './world/Collectibles.js';
 import { Dragon } from './world/Dragon.js';
+import { Motorcycle } from './world/Motorcycle.js';
 import { Input } from './Input.js';
 import { DebugHelper } from './DebugHelper.js';
 import { GameModeManager } from './game/GameModeManager.js';
@@ -19,14 +22,13 @@ import { PauseMenu } from './ui/PauseMenu.js';
 import { Shop } from './world/Shop.js';
 
 // ==========================================
-// CENA, CÂMERA, RENDERER E NÉVOA
+// CENA, CÂMERA, RENDERER E CICLO DIA/NOITE
 // ==========================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#87CEEB'); 
 scene.fog = new THREE.Fog('#87CEEB', 200, 1200);
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);
-
 const listener = new THREE.AudioListener();
 camera.add(listener);
 
@@ -37,126 +39,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
 
-// ==========================================
-// LUZES DO SOL E AMBIENTE
-// ==========================================
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.1);
-scene.add(ambientLight);
-
-const dirLight = new THREE.DirectionalLight(0xfffaed, 1.4);
-dirLight.position.set(20, 40, 20);
-dirLight.castShadow = true;
-dirLight.shadow.mapSize.set(2048, 2048);
-dirLight.shadow.bias = -0.001;
-scene.add(dirLight);
-
-// ==========================================
-// REFLETORES DAS 4 PONTAS (LUZ BRANCA POTENTE)
-// ==========================================
-const cornerLights = [];
-const lightPositions = [
-  new THREE.Vector3(200, 150, 200),
-  new THREE.Vector3(-200, 150, 200),
-  new THREE.Vector3(200, 150, -200),
-  new THREE.Vector3(-200, 150, -200)
-];
-
-lightPositions.forEach(pos => {
-  const light = new THREE.PointLight('#ffffff', 0, 2000, 0.5); 
-  light.position.copy(pos);
-  scene.add(light);
-  cornerLights.push(light);
-});
-
-// ==========================================
-// MÁQUINA DE DIA E NOITE
-// ==========================================
-class DayNightCycle {
-  constructor(scene, dirLight, ambientLight, cornerLights) {
-    this.scene = scene;
-    this.dirLight = dirLight;
-    this.ambientLight = ambientLight;
-    this.cornerLights = cornerLights;
-
-    this.time = 8; 
-    this.timeSpeed = 0.1; 
-
-    this.colors = {
-      night: new THREE.Color('#020208'),
-      sunrise: new THREE.Color('#ff7b00'),
-      day: new THREE.Color('#87CEEB'),
-      sunset: new THREE.Color('#ff4500')
-    };
-  }
-
-  update(delta) {
-    this.time += delta * this.timeSpeed;
-    if (this.time >= 24) this.time = 0; 
-
-    let skyColor = new THREE.Color();
-    let lightInt = 0;
-    let ambientInt = 0;
-    let reflectorInt = 0; 
-
-    if (this.time >= 0 && this.time < 5) { 
-        skyColor.copy(this.colors.night);
-        lightInt = 0; 
-        ambientInt = 0.6; 
-        reflectorInt = 5.0; 
-    } else if (this.time >= 5 && this.time < 8) { 
-        const t = (this.time - 5) / 3;
-        skyColor.lerpColors(this.colors.night, this.colors.sunrise, t);
-        lightInt = t * 0.8; 
-        ambientInt = 0.6 + (t * 0.2); 
-        reflectorInt = 5.0 - (t * 5.0); 
-    } else if (this.time >= 8 && this.time < 11) { 
-        const t = (this.time - 8) / 3;
-        skyColor.lerpColors(this.colors.sunrise, this.colors.day, t);
-        lightInt = 0.8 + (t * 0.6); 
-        ambientInt = 0.8 + (t * 0.3);
-        reflectorInt = 0; 
-    } else if (this.time >= 11 && this.time < 16) { 
-        skyColor.copy(this.colors.day);
-        lightInt = 1.4; 
-        ambientInt = 1.1;
-        reflectorInt = 0; 
-    } else if (this.time >= 16 && this.time < 19) { 
-        const t = (this.time - 16) / 3;
-        skyColor.lerpColors(this.colors.day, this.colors.sunset, t);
-        lightInt = 1.4 - (t * 0.6); 
-        ambientInt = 1.1 - (t * 0.3);
-        reflectorInt = 0; 
-    } else if (this.time >= 19 && this.time < 21) { 
-        const t = (this.time - 19) / 2;
-        skyColor.lerpColors(this.colors.sunset, this.colors.night, t);
-        lightInt = 0.8 - (t * 0.8); 
-        ambientInt = 0.8 - (t * 0.2); 
-        reflectorInt = t * 5.0; 
-    } else { 
-        skyColor.copy(this.colors.night);
-        lightInt = 0; 
-        ambientInt = 0.6; 
-        reflectorInt = 5.0; 
-    }
-
-    this.scene.background.copy(skyColor);
-    this.scene.fog.color.copy(skyColor);
-
-    const sunAngle = ((this.time - 6) / 12) * Math.PI;
-    const sunRadius = 150;
-    this.dirLight.position.x = Math.cos(sunAngle) * sunRadius;
-    this.dirLight.position.y = Math.sin(sunAngle) * sunRadius;
-    this.dirLight.intensity = lightInt;
-    
-    this.ambientLight.intensity = ambientInt;
-
-    this.cornerLights.forEach(light => {
-        light.intensity = reflectorInt;
-    });
-  }
-}
-
-const dayNight = new DayNightCycle(scene, dirLight, ambientLight, cornerLights);
+const dayNight = new DayNightCycle(scene);
+const orbitCamera = new OrbitCameraRig(camera, renderer.domElement);
+const clock = new THREE.Clock();
 
 // ==========================================
 // FÍSICA E ENTIDADES DO JOGO
@@ -179,9 +64,9 @@ const player = new CharacterController({
 const world = new World({ scene, physics });
 const castle = new Castle({ scene });
 const escada = new Escada({ 
-    scene, 
-    physics, 
-    position: new THREE.Vector3(400, -0.2, -380)
+  scene, 
+  physics, 
+  position: new THREE.Vector3(400, -0.2, -380)
 });
 
 const forestManager = new ForestManager({ scene, physics, obstacleMeshes: world.obstacleMeshes });
@@ -190,193 +75,86 @@ const collectibles = new Collectibles({ scene });
 const loja = new Shop(scene);
 
 const dragon = new Dragon({ 
-    scene, 
-    physics, 
-    player, 
-    listener,
-    spawnPosition: new THREE.Vector3(400, 45.0, -400) 
+  scene, 
+  physics, 
+  player, 
+  listener,
+  spawnPosition: new THREE.Vector3(400, 45.0, -400) 
+});
+
+// Instancia a Honda Twister 300 próxima ao ponto inicial do jogador e da Loja
+const moto = new Motorcycle({
+  scene,
+  physics,
+  player,
+  spawnPosition: new THREE.Vector3(6, 0, 142)
 });
 
 const dogs = new Dogs({ scene, player });
+dogs.spawnCompanion('golden');
 
 const gameModeManager = new GameModeManager({ scene, player });
 const minimap = new Minimap({ player, gameModeManager });
 const input = new Input();
 
-dogs.spawnCompanion('golden');
-
 // ==========================================
-// CÂMERA ORBITAL (VOO E PINCH-TO-ZOOM MULTI-TOUCH)
+// INTERFACE E MENUS
 // ==========================================
-class OrbitCameraRig {
-  constructor(camera, domElement) {
-    this.camera = camera;
-    this.domElement = domElement;
-    this.yaw = 0;
-    this.pitch = THREE.MathUtils.degToRad(20);
-    this.distance = 8.0;
-    this.minPitch = THREE.MathUtils.degToRad(-45);
-    this.maxPitch = THREE.MathUtils.degToRad(85);
-    this.minDistance = 1.0;
-    this.maxDistance = 48.0;
-    this.yawSpeed = 0.006;
-    this.pitchSpeed = 0.006;
-    this.pinchZoomSpeed = 0.05; 
-    this.target = new THREE.Vector3();
-    this.pointers = []; 
-    this.prevPinchDistance = null;
-    this._lastX = 0;
-    this._lastY = 0;
-    this._bindEvents();
-  }
-
-  _isOverJoystick(target) {
-    return !!(target && target.closest && target.closest('#joystick-zone'));
-  }
-
-  _bindEvents() {
-    const onDown = (e) => {
-      if (this._isOverJoystick(e.target)) return;
-      const existingPointer = this.pointers.find(p => p.id === e.pointerId);
-      if (!existingPointer) {
-        this.pointers.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
-      }
-      if (this.pointers.length === 1) {
-        this._lastX = e.clientX;
-        this._lastY = e.clientY;
-      } else if (this.pointers.length === 2) {
-        const dx = this.pointers[0].x - this.pointers[1].x;
-        const dy = this.pointers[0].y - this.pointers[1].y;
-        this.prevPinchDistance = Math.hypot(dx, dy);
-      }
-    };
-    
-    const onMove = (e) => {
-      const pointer = this.pointers.find(p => p.id === e.pointerId);
-      if (!pointer) return;
-      pointer.x = e.clientX;
-      pointer.y = e.clientY;
-
-      if (this.pointers.length === 1) {
-        const deltaX = e.clientX - this._lastX;
-        const deltaY = e.clientY - this._lastY;
-        this._lastX = e.clientX;
-        this._lastY = e.clientY;
-
-        this.yaw -= deltaX * this.yawSpeed;
-        this.pitch = THREE.MathUtils.clamp(
-          this.pitch - deltaY * this.pitchSpeed,
-          this.minPitch,
-          this.maxPitch
-        );
-      } else if (this.pointers.length === 2) {
-        const dx = this.pointers[0].x - this.pointers[1].x;
-        const dy = this.pointers[0].y - this.pointers[1].y;
-        const currentPinchDistance = Math.hypot(dx, dy);
-
-        if (this.prevPinchDistance !== null) {
-          const pinchDelta = this.prevPinchDistance - currentPinchDistance;
-          this.distance = THREE.MathUtils.clamp(
-            this.distance + pinchDelta * this.pinchZoomSpeed,
-            this.minDistance,
-            this.maxDistance
-          );
-        }
-        this.prevPinchDistance = currentPinchDistance;
-      }
-    };
-    
-    const onUp = (e) => {
-      this.pointers = this.pointers.filter(p => p.id !== e.pointerId);
-      if (this.pointers.length === 1) {
-        this._lastX = this.pointers[0].x;
-        this._lastY = this.pointers[0].y;
-      } else if (this.pointers.length < 2) {
-        this.prevPinchDistance = null; 
-      }
-    };
-
-    this.domElement.addEventListener('pointerdown', onDown);
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
-
-    this.domElement.addEventListener('wheel', (e) => {
-      this.distance = THREE.MathUtils.clamp(
-        this.distance + e.deltaY * 0.012,
-        this.minDistance,
-        this.maxDistance
-      );
-    }, { passive: true });
-  }
-
-  update(playerPosition, delta) {
-    const zoomFactor = 1 - THREE.MathUtils.clamp((this.distance - this.minDistance) / (this.maxDistance - this.minDistance), 0, 1);
-    const targetHeight = THREE.MathUtils.lerp(1.2, 1.8, zoomFactor);
-
-    const focusPoint = playerPosition.clone().add(new THREE.Vector3(0, targetHeight, 0));
-    const lerpAlpha = 1 - Math.pow(0.001, delta);
-    this.target.lerp(focusPoint, lerpAlpha);
-
-    const horizontalR = this.distance * Math.cos(this.pitch);
-    const x = this.target.x + horizontalR * Math.sin(this.yaw);
-    const z = this.target.z + horizontalR * Math.cos(this.yaw);
-    
-    let y = this.target.y + this.distance * Math.sin(this.pitch);
-    y = Math.max(0.5, y); 
-
-    this.camera.position.set(x, y, z);
-    this.camera.lookAt(this.target);
-  }
-}
-
-const orbitCamera = new OrbitCameraRig(camera, renderer.domElement);
-const clock = new THREE.Clock();
-
 const uiContainer = document.getElementById('ui-container');
 const actionsPanel = document.getElementById('actions-panel');
 const modalControls = document.getElementById('modal-controls');
 const charSelectDiv = document.getElementById('character-select-menu');
 const mainMenuDiv = document.getElementById('main-menu');
+const btnMount = document.getElementById('btn-mount');
+const btnRide = document.getElementById('btn-ride');
 
 if (uiContainer) uiContainer.classList.add('hidden');
 if (actionsPanel) actionsPanel.classList.add('hidden');
 
 let isGameStarted = false;
 
-// ==========================================
-// EVENTOS DE JOGO (Loja, Montaria, Menus)
-// ==========================================
 window.addEventListener('roupaComprada', async (e) => {
   const outfit = e.detail;
   if (player && player.ready) {
-      const feedback = document.getElementById('shop-feedback');
-      if (feedback) feedback.innerText = "Vestindo roupa...";
+    const feedback = document.getElementById('shop-feedback');
+    if (feedback) feedback.innerText = "Equipando...";
 
-      await player.changeOutfit(outfit);
-      
-      if (feedback) {
-          feedback.innerText = "Roupa equipada!";
-          setTimeout(() => { feedback.innerText = ""; }, 1500);
-      }
-      // Fecha a loja e libera os movimentos da personagem automaticamente!
-      loja.close();
+    await player.changeOutfit(outfit);
+
+    if (feedback) {
+      feedback.innerText = "Item equipado!";
+      setTimeout(() => { feedback.innerText = ""; }, 1500);
+    }
+    loja.close();
   }
 });
 
-const btnMount = document.getElementById('btn-mount');
 if (btnMount) {
   btnMount.addEventListener('click', () => {
-    if (dragon) {
-      dragon.toggleMount(player, dogs);
-    }
+    if (dragon && !moto.isMounted) dragon.toggleMount(player, dogs);
   });
 }
 
+if (btnRide) {
+  btnRide.addEventListener('click', () => {
+    if (moto && !dragon.isMounted) moto.toggleMount(player, dogs);
+  });
+}
+
+// Atalho Tecla E no teclado para subir/descer da moto rapidamente
+window.addEventListener('keydown', (e) => {
+  if (!isGameStarted || pauseMenu.isPaused || loja.shopActive) return;
+  if (e.key.toLowerCase() === 'e' && moto && moto.isLoaded && !dragon.isMounted) {
+    const activePos = moto.isMounted ? moto.group.position : player.group.position;
+    const dist = activePos.distanceTo(moto.group.position);
+    if (moto.isMounted || dist <= 4.5) {
+      moto.toggleMount(player, dogs);
+    }
+  }
+});
+
 const pauseMenu = new PauseMenu({
-  onResume: () => {
-    console.log('[Game] Jogo Retomado');
-  },
+  onResume: () => console.log('[Game] Jogo Retomado'),
   onOpenControls: () => {
     if (modalControls) modalControls.classList.remove('hidden');
   },
@@ -389,16 +167,12 @@ const pauseMenu = new PauseMenu({
   }
 });
 
-// Quando clica em START GAME, abre a tela de escolha (Yasmin / Gustavo)
 const mainMenu = new MainMenu({
   onStartGame: () => {
-    if (charSelectDiv) {
-      charSelectDiv.classList.remove('hidden');
-    }
+    if (charSelectDiv) charSelectDiv.classList.remove('hidden');
   }
 });
 
-// Quando escolhe Yasmin ou Gustavo no card
 window.selectCharacter = async function(charId) {
   if (charSelectDiv) charSelectDiv.classList.add('hidden');
   if (mainMenuDiv) mainMenuDiv.classList.add('hidden');
@@ -409,10 +183,10 @@ window.selectCharacter = async function(charId) {
 
   isGameStarted = true;
   pauseMenu.canPause = true;
-  
+
   if (uiContainer) uiContainer.classList.remove('hidden');
   if (actionsPanel) actionsPanel.classList.remove('hidden');
-  
+
   console.log(`[Game] Jogo Iniciado com: ${charId.toUpperCase()}!`);
 };
 
@@ -421,132 +195,149 @@ window.selectCharacter = async function(charId) {
 // ==========================================
 function animate() {
   requestAnimationFrame(animate);
-  
+
   const delta = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
 
   dayNight.update(delta);
 
-  // === LÓGICA DO CONTROLE XBOX ===
+  // Posição ativa do jogador no mundo (a pé ou sobre a moto)
+  const activePlayerPos = (moto && moto.isMounted) ? moto.group.position : player.group.position;
+
+  // Controles do Gamepad (Xbox)
   const padState = input.getGamepadState();
-
   if (padState && isGameStarted && !pauseMenu.isPaused) {
-    
-    // NAVEGAÇÃO DA LOJA (Controle)
     if (loja.shopActive) {
-        if (!window.lastPadTime) window.lastPadTime = 0;
-        
-        if (elapsed - window.lastPadTime > 0.2) {
-            const btns = Array.from(document.querySelectorAll('.shop-btn, #btn-close-shop'));
-            let activeIdx = btns.findIndex(b => b === document.activeElement);
+      if (!window.lastPadTime) window.lastPadTime = 0;
 
-            const gamepad = input.getGamepad();
-            const yAxis = gamepad ? gamepad.axes[1] : 0;
+      if (elapsed - window.lastPadTime > 0.2) {
+        const btns = Array.from(document.querySelectorAll('.shop-btn, #btn-close-shop'));
+        let activeIdx = btns.findIndex((b) => b === document.activeElement);
 
-            if (padState.camY > 0.5 || yAxis > 0.5) {
-                activeIdx = (activeIdx + 1) % btns.length;
-                btns[activeIdx].focus();
-                window.lastPadTime = elapsed;
-            } else if (padState.camY < -0.5 || yAxis < -0.5) {
-                activeIdx = (activeIdx - 1 + btns.length) % btns.length;
-                btns[activeIdx].focus();
-                window.lastPadTime = elapsed;
-            }
-        }
+        const gamepad = input.getGamepad();
+        const yAxis = gamepad ? gamepad.axes[1] : 0;
 
-        if (padState.btnA && document.activeElement) {
-            document.activeElement.click();
+        if (padState.camY > 0.5 || yAxis > 0.5) {
+          activeIdx = (activeIdx + 1) % btns.length;
+          btns[activeIdx].focus();
+          window.lastPadTime = elapsed;
+        } else if (padState.camY < -0.5 || yAxis < -0.5) {
+          activeIdx = (activeIdx - 1 + btns.length) % btns.length;
+          btns[activeIdx].focus();
+          window.lastPadTime = elapsed;
         }
-        
-        if (padState.btnB) {
-            loja.close(); // Destrava a loja e devolve o movimento!
-        }
+      }
+
+      if (padState.btnA && document.activeElement) document.activeElement.click();
+      if (padState.btnB) loja.close();
     } else {
-        // MODO NORMAL DE JOGO (Câmera e Dragão)
-        orbitCamera.yaw -= padState.camX * 0.05;
-        orbitCamera.pitch = THREE.MathUtils.clamp(
-          orbitCamera.pitch - padState.camY * 0.03,
-          orbitCamera.minPitch,
-          orbitCamera.maxPitch
-        );
+      orbitCamera.yaw -= padState.camX * 0.05;
+      orbitCamera.pitch = THREE.MathUtils.clamp(
+        orbitCamera.pitch - padState.camY * 0.03,
+        orbitCamera.minPitch,
+        orbitCamera.maxPitch
+      );
 
-        if (padState.btnX && dragon) {
-          const dist = player.group.position.distanceTo(dragon.group.position);
-          if (dragon.isMounted || dist <= 10.0) {
-            dragon.toggleMount(player, dogs);
-          }
-        }
+      if (padState.btnX) {
+        const distMoto = moto && moto.isLoaded ? activePlayerPos.distanceTo(moto.group.position) : Infinity;
+        const distDragon = dragon && dragon.isLoaded ? activePlayerPos.distanceTo(dragon.group.position) : Infinity;
 
-        if (padState.btnY) {
-           if (player && !dragon.isMounted) player.playTrigger('dance');
+        if (moto && (moto.isMounted || (distMoto <= 4.5 && !dragon.isMounted))) {
+          moto.toggleMount(player, dogs);
+        } else if (dragon && (dragon.isMounted || (distDragon <= 10.0 && !moto.isMounted))) {
+          dragon.toggleMount(player, dogs);
         }
+      }
+
+      if (padState.btnY && player && !dragon.isMounted && !moto.isMounted) {
+        player.playTrigger('dance');
+      }
     }
   }
 
   if (isGameStarted && !pauseMenu.isPaused) {
     physics.step(delta);
 
-    if (dragon && dragon.isLoaded) {
-      const dist = player.group.position.distanceTo(dragon.group.position);
-      const actionBtns = actionsPanel ? actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-pause)') : [];
+    const actionBtns = actionsPanel ? actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-ride):not(#btn-pause)') : [];
 
+    // Atualiza botão de Montar no Dragão
+    if (dragon && dragon.isLoaded && btnMount) {
+      const distDragon = activePlayerPos.distanceTo(dragon.group.position);
       if (dragon.isMounted) {
-        if (btnMount) {
-          btnMount.classList.remove('hidden');
-          btnMount.innerText = '🛑 Desmontar';
-        }
-        actionBtns.forEach(btn => btn.classList.add('hidden'));
+        btnMount.classList.remove('hidden');
+        btnMount.innerText = '🛑 Desmontar';
+      } else if (!moto.isMounted && distDragon <= 10.0) {
+        btnMount.classList.remove('hidden');
+        btnMount.innerText = '🐉 Montar (Botão X)';
       } else {
-        if (btnMount) {
-          if (dist <= 10.0) {
-            btnMount.classList.remove('hidden');
-            btnMount.innerText = '🐉 Montar (Botão X)';
-          } else {
-            btnMount.classList.add('hidden');
-          }
-        }
-        actionBtns.forEach(btn => btn.classList.remove('hidden'));
+        btnMount.classList.add('hidden');
       }
     }
 
+    // Atualiza botão de Pilotar a Moto
+    if (moto && moto.isLoaded && btnRide) {
+      const distMoto = activePlayerPos.distanceTo(moto.group.position);
+      if (moto.isMounted) {
+        btnRide.classList.remove('hidden');
+        btnRide.innerText = '🛑 Descer da Moto (E / X)';
+      } else if (!dragon.isMounted && distMoto <= 4.5) {
+        btnRide.classList.remove('hidden');
+        btnRide.innerText = '🏍️ Pilotar (E / X)';
+      } else {
+        btnRide.classList.add('hidden');
+      }
+    }
+
+    // Esconde botões de Dançar/Comemorar quando estiver voando ou pilotando
+    if (dragon.isMounted || moto.isMounted) {
+      actionBtns.forEach((btn) => btn.classList.add('hidden'));
+    } else {
+      actionBtns.forEach((btn) => btn.classList.remove('hidden'));
+    }
+
+    // Atualização de Movimento (Dragão vs Moto vs A Pé)
     if (dragon && dragon.isMounted) {
       dragon.update(delta, player, input, orbitCamera.yaw, dogs);
+      moto.update(delta, player, input);
+    } else if (moto && moto.isMounted) {
+      moto.update(delta, player, input);
+      dogs.update(delta);
+      dragon.update(delta, player, input, orbitCamera.yaw, dogs);
     } else {
-      // Só bloqueia o movimento enquanto a janela da loja estiver realmente aberta
       if (!loja.shopActive) {
-          const { forward, right, isRunning } = input.getMovement();
-          player.setInput(forward, right, orbitCamera.yaw, isRunning);
+        const { forward, right, isRunning } = input.getMovement();
+        player.setInput(forward, right, orbitCamera.yaw, isRunning);
       } else {
-          player.setInput(0, 0, orbitCamera.yaw, false);
+        player.setInput(0, 0, orbitCamera.yaw, false);
       }
       player.update(delta, elapsed);
+      moto.update(delta, player, input);
 
       dogs.update(delta);
       dragon.update(delta, player, input, orbitCamera.yaw, dogs);
     }
 
-    collectibles.update(player.group.position, elapsed);
+    collectibles.update(activePlayerPos, elapsed);
     gameModeManager.update(delta, elapsed);
     minimap.update(orbitCamera.yaw);
 
     world.update(delta);
     forestManager.update(delta);
     animals.update(delta, elapsed);
-    
-    if (player && player.group) {
-        loja.update(player.group.position);
+
+    if (player && !moto.isMounted) {
+      loja.update(activePlayerPos);
     }
 
-    orbitCamera.update(player.group.position, delta);
-
+    orbitCamera.update(activePlayerPos, delta);
   } else if (!isGameStarted) {
     orbitCamera.yaw += 0.15 * delta;
-    
+
     world.update(delta);
     forestManager.update(delta);
     animals.update(delta, elapsed);
     dragon.update(delta, player, input, orbitCamera.yaw, dogs);
-    
+
     orbitCamera.update(player.group.position, delta);
   }
 
@@ -554,7 +345,7 @@ function animate() {
     const { forward, right } = input.getMovement();
     debug.update(
       `forward: ${forward.toFixed(2)} | right: ${right.toFixed(2)}\n` +
-      `pos: (${player.group.position.x.toFixed(1)}, ${player.group.position.z.toFixed(1)})\n` +
+      `pos: (${activePlayerPos.x.toFixed(1)}, ${activePlayerPos.z.toFixed(1)})\n` +
       `camYaw: ${THREE.MathUtils.radToDeg(orbitCamera.yaw).toFixed(0)}° | pitch: ${THREE.MathUtils.radToDeg(orbitCamera.pitch).toFixed(0)}°\n` +
       `fps: ${(1 / delta).toFixed(0)}`
     );
@@ -572,7 +363,7 @@ window.addEventListener('resize', () => {
 });
 
 window.triggerAnim = (animName) => {
-  if (dragon && dragon.isMounted) return; 
+  if ((dragon && dragon.isMounted) || (moto && moto.isMounted)) return;
   if (player && player.ready && !pauseMenu.isPaused) {
     player.playTrigger(animName);
   }
