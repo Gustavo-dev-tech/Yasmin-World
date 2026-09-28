@@ -5,6 +5,7 @@ import { CharacterController } from './player/CharacterController.js';
 import { OrbitCameraRig } from './player/OrbitCameraRig.js';
 import { DayNightCycle } from './world/DayNightCycle.js';
 import { WaterSystem } from './world/WaterSystem.js';
+import { GroundSystem } from './world/GroundSystem.js';
 import { World } from './world/World.js';
 import { Castle } from './world/Castle.js'; 
 import { Escada } from './world/Escada.js';
@@ -48,21 +49,25 @@ const clock = new THREE.Clock();
 const debug = new DebugHelper(CONFIG.DEBUG);
 const physics = new PhysicsWorld();
 
+// Com landSize = 250 (ilha vai de -125 a +125), o jogador nasce em z = 95 na estrada de pedras
 const player = new CharacterController({
   scene,
   physics,
   debug,
   modelUrl: CONFIG.ACTIVE_MODEL,
   walkAnimationUrl: CONFIG.WALK_ANIMATION_URL,
-  position: new THREE.Vector3(0, 0, 150), 
+  position: new THREE.Vector3(0, 0, 95), 
   radius: CONFIG.PLAYER_RADIUS,
   height: CONFIG.PLAYER_HEIGHT,
   speed: CONFIG.PLAYER_SPEED,
 });
 
-const world = new World({ scene, physics });
+// Passamos um Group isolado (não adicionado ao scene) para o World.js:
+// Isso mantém a física do solo funcionando, mas REMOVE 100% o piso antigo (.glb) da tela!
+const legacyWorldContainer = new THREE.Group();
+const world = new World({ scene: legacyWorldContainer, physics });
 
-// Oceano com Batimetria 3D cercando o continente do jogo
+// Oceano AAA com Batimetria 3D (Solo = 250, Mar = 600)
 const water = new WaterSystem({
   scene,
   landSize: 250,
@@ -70,12 +75,22 @@ const water = new WaterSystem({
   resolution: 48
 });
 
+// Novo Sistema de Solo Procedural, Estrada de Pedras, Poças e Grama 3D Otimizada
+const ground = new GroundSystem({
+  scene,
+  landSize: 250,
+  waterLevel: -0.15,
+  resolution: 128
+});
+
 const castle = new Castle({ scene });
+
 const escada = new Escada({ 
   scene, 
   physics, 
-  position: new THREE.Vector3(400, -0.2, -380)
-});
+  position: new THREE.Vector3(0, 0, -35) });
+
+  //
 
 const forestManager = new ForestManager({ scene, physics, obstacleMeshes: world.obstacleMeshes });
 const animals = new Animals({ scene, physics, obstacleMeshes: world.obstacleMeshes });
@@ -87,14 +102,15 @@ const dragon = new Dragon({
   physics, 
   player, 
   listener,
-  spawnPosition: new THREE.Vector3(400, 45.0, -400) 
+  spawnPosition: new THREE.Vector3(0, 45.0, -60) 
 });
+//const escada = new Escada({
 
 const moto = new Motorcycle({
   scene,
   physics,
   player,
-  spawnPosition: new THREE.Vector3(6, 0, 142)
+  spawnPosition: new THREE.Vector3(5, 0, 88)
 });
 
 const dogs = new Dogs({ scene, player });
@@ -114,6 +130,7 @@ const ui = new UIManager({
   input,
   orbitCamera,
   water,
+  ground,
   dayNight
 });
 
@@ -130,6 +147,7 @@ function animate() {
 
   dayNight.update(delta, activePlayerPos);
   water.update(delta, elapsed, activePlayerPos, dayNight);
+  ground.update(delta, elapsed, activePlayerPos, dayNight, moto);
   ui.updateGamepad(elapsed, activePlayerPos);
 
   if (ui.isGameStarted && !ui.isPaused) {
@@ -201,5 +219,4 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
-
-//water
+//const dragon = new Dragon({

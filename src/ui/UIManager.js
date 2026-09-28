@@ -4,7 +4,7 @@ import { MainMenu } from './MainMenu.js';
 import { PauseMenu } from './PauseMenu.js';
 
 export class UIManager {
-  constructor({ player, dragon, moto, dogs, loja, input, orbitCamera, water, dayNight }) {
+  constructor({ player, dragon, moto, dogs, loja, input, orbitCamera, water, ground, dayNight }) {
     this.player = player;
     this.dragon = dragon;
     this.moto = moto;
@@ -13,11 +13,12 @@ export class UIManager {
     this.input = input;
     this.orbitCamera = orbitCamera;
     this.water = water;
+    this.ground = ground;
     this.dayNight = dayNight;
 
     this.isGameStarted = false;
     this.lastPadTime = 0;
-    this.currentCharacterId = 'yasmin'; // Yasmin já é carregada por padrão no boot
+    this.currentCharacterId = 'yasmin';
 
     // Elementos do DOM
     this.uiContainer = document.getElementById('ui-container');
@@ -28,6 +29,9 @@ export class UIManager {
     this.btnMount = document.getElementById('btn-mount');
     this.btnRide = document.getElementById('btn-ride');
     this.btnHeadlight = document.getElementById('btn-headlight');
+
+    // Cria automaticamente os botões de Chamar Dragão e Buzina se não existirem no index.html
+    this._ensureExtraHUDButtons();
 
     if (this.uiContainer) this.uiContainer.classList.add('hidden');
     if (this.actionsPanel) this.actionsPanel.classList.add('hidden');
@@ -40,6 +44,35 @@ export class UIManager {
 
   get isPaused() {
     return this.pauseMenu ? this.pauseMenu.isPaused : false;
+  }
+
+  // =========================================================================
+  // CRIA OS BOTÕES DE CHAMAR DRAGÃO E BUZINA DA MOTO NO HUD AUTOMATICAMENTE
+  // =========================================================================
+  _ensureExtraHUDButtons() {
+    if (!this.actionsPanel) return;
+
+    // 1. Botão de Chamar o Dragão (C)
+    this.btnSummonDragon = document.getElementById('btn-summon-dragon');
+    if (!this.btnSummonDragon) {
+      this.btnSummonDragon = document.createElement('button');
+      this.btnSummonDragon.id = 'btn-summon-dragon';
+      this.btnSummonDragon.className = this.btnMount ? this.btnMount.className : 'action-btn hidden';
+      this.btnSummonDragon.classList.add('hidden');
+      this.btnSummonDragon.innerText = '🐉 Chamar Dragão (C)';
+      this.actionsPanel.appendChild(this.btnSummonDragon);
+    }
+
+    // 2. Botão de Buzina da Moto (H)
+    this.btnHorn = document.getElementById('btn-horn');
+    if (!this.btnHorn) {
+      this.btnHorn = document.createElement('button');
+      this.btnHorn.id = 'btn-horn';
+      this.btnHorn.className = this.btnHeadlight ? this.btnHeadlight.className : 'action-btn hidden';
+      this.btnHorn.classList.add('hidden');
+      this.btnHorn.innerText = '🔊 Buzinar (H)';
+      this.actionsPanel.appendChild(this.btnHorn);
+    }
   }
 
   // =========================================================================
@@ -78,7 +111,6 @@ export class UIManager {
     this.loadingBarFill = barFill;
     this.isWorldLoaded = false;
 
-    // Monitora automaticamente todos os modelos GLB, FBX e texturas do Three.js
     THREE.DefaultLoadingManager.onStart = () => {
       this.showLoadingBar(15);
     };
@@ -138,13 +170,13 @@ export class UIManager {
   }
 
   _initWaterGUI() {
-    if (!this.water) return;
-    this.waterGui = new GUI({ title: '🌊 Oceano & Clima (Tecla G)' });
-    this.water.attachGUI(this.waterGui, this.dayNight);
+    if (!this.water && !this.ground) return;
+    this.waterGui = new GUI({ title: '🌍 Mundo, Oceano & Clima (Tecla G)' });
+    if (this.water) this.water.attachGUI(this.waterGui, this.dayNight);
+    if (this.ground) this.ground.attachGUI(this.waterGui, null, this.water);
     this.waterGui.close();
   }
 
-  // Aguarda o modelo base terminar de carregar caso o usuário clique muito rápido no menu
   async _waitForPlayerReady() {
     if (this.player && this.player.ready) return;
     this.showLoadingBar(65);
@@ -185,6 +217,15 @@ export class UIManager {
       });
     }
 
+    // Clique no botão de Chamar o Dragão
+    if (this.btnSummonDragon) {
+      this.btnSummonDragon.addEventListener('click', () => {
+        if (this.dragon && this.dragon.isLoaded && !this.dragon.isMounted && !this.moto.isMounted) {
+          this.dragon.summon(this.player.group.position, this.orbitCamera.yaw);
+        }
+      });
+    }
+
     if (this.btnRide) {
       this.btnRide.addEventListener('click', () => {
         if (this.moto && !this.dragon.isMounted) {
@@ -201,6 +242,23 @@ export class UIManager {
       });
     }
 
+    // Botão de Buzina da Moto (Funciona segurando no mouse/celular ou dando um clique)
+    if (this.btnHorn) {
+      const startH = (e) => {
+        e.preventDefault();
+        if (this.moto && this.moto.isMounted) this.moto.startHorn();
+      };
+      const stopH = () => {
+        if (this.moto) this.moto.stopHorn();
+      };
+      this.btnHorn.addEventListener('mousedown', startH);
+      this.btnHorn.addEventListener('mouseup', stopH);
+      this.btnHorn.addEventListener('mouseleave', stopH);
+      this.btnHorn.addEventListener('touchstart', startH, { passive: false });
+      this.btnHorn.addEventListener('touchend', stopH);
+      this.btnHorn.addEventListener('touchcancel', stopH);
+    }
+
     window.addEventListener('keydown', (e) => {
       const key = (e.key || '').toLowerCase();
 
@@ -211,27 +269,61 @@ export class UIManager {
 
       if (!this.isGameStarted || this.isPaused || this.loja.shopActive) return;
 
-      if (key === 'e' && this.moto && this.moto.isLoaded && !this.dragon.isMounted) {
-        const activePos = this.moto.isMounted ? this.moto.group.position : this.player.group.position;
-        const dist = activePos.distanceTo(this.moto.group.position);
-        if (this.moto.isMounted || dist <= 4.5) {
+      // Tecla C: Chamar o Dragão
+      if (key === 'c' && this.dragon && this.dragon.isLoaded && !this.dragon.isMounted && !this.moto.isMounted) {
+        this.dragon.summon(this.player.group.position, this.orbitCamera.yaw);
+      }
+
+      // Tecla E: Montar/Desmontar da Moto ou do Dragão (o que estiver mais perto)
+      if (key === 'e' && !e.repeat) {
+        const activePos = this.moto?.isMounted
+          ? this.moto.group.position
+          : this.dragon?.isMounted
+          ? this.dragon.group.position
+          : this.player.group.position;
+
+        if (this.moto && this.moto.isMounted) {
           this.moto.toggleMount(this.player, this.dogs);
+          return;
+        }
+        if (this.dragon && this.dragon.isMounted) {
+          this.dragon.toggleMount(this.player, this.dogs);
+          return;
+        }
+
+        const distMoto = this.moto && this.moto.isLoaded ? activePos.distanceTo(this.moto.group.position) : Infinity;
+        const distDragon = this.dragon && this.dragon.isLoaded ? activePos.distanceTo(this.dragon.group.position) : Infinity;
+
+        if (distMoto <= 4.5 && distMoto <= distDragon) {
+          this.moto.toggleMount(this.player, this.dogs);
+        } else if (distDragon <= 12.0) {
+          this.dragon.toggleMount(this.player, this.dogs);
         }
       }
 
-      if (key === 'f' && this.moto && this.moto.isLoaded && this.moto.isMounted) {
+      // Tecla F: Farol da Moto
+      if (key === 'f' && !e.repeat && this.moto && this.moto.isLoaded && this.moto.isMounted) {
         this.moto.toggleHeadlight();
+      }
+
+      // Tecla H: Buzina da Moto (Segurar)
+      if (key === 'h' && this.moto && this.moto.isLoaded && this.moto.isMounted) {
+        this.moto.startHorn();
       }
     });
 
-    // Seleção de Personagem Otimizada (Sem recarregar a Yasmin duas vezes!)
+    window.addEventListener('keyup', (e) => {
+      const key = (e.key || '').toLowerCase();
+      if (key === 'h' && this.moto) {
+        this.moto.stopHorn();
+      }
+    });
+
     window.selectCharacter = async (charId) => {
       const targetChar = (charId || 'yasmin').toLowerCase();
 
-      // Garante que o carregamento inicial em segundo plano terminou
       await this._waitForPlayerReady();
 
-      // Só chama changeOutfit se o jogador escolheu um personagem DIFERENTE do que já está na cena
       if (targetChar !== this.currentCharacterId) {
         this.showLoadingBar(50);
         await this.player.changeOutfit(targetChar);
@@ -250,7 +342,6 @@ export class UIManager {
       if (this.uiContainer) this.uiContainer.classList.remove('hidden');
       if (this.actionsPanel) this.actionsPanel.classList.remove('hidden');
 
-      // Garante o foco da janela para receber comandos de teclado (especialmente via AnyDesk)
       window.focus();
       console.log(`[Game] Jogo Iniciado com: ${targetChar.toUpperCase()}!`);
     };
@@ -302,52 +393,84 @@ export class UIManager {
 
         if (this.moto && (this.moto.isMounted || (distMoto <= 4.5 && !this.dragon.isMounted))) {
           this.moto.toggleMount(this.player, this.dogs);
-        } else if (this.dragon && (this.dragon.isMounted || (distDragon <= 10.0 && !this.moto.isMounted))) {
+        } else if (this.dragon && (this.dragon.isMounted || (distDragon <= 12.0 && !this.moto.isMounted))) {
           this.dragon.toggleMount(this.player, this.dogs);
         }
       }
 
-      if (padState.btnY && this.player && !this.dragon.isMounted && !this.moto.isMounted) {
-        this.player.playTrigger('dance');
+      // Botão Y no Controle Xbox: Buzina se estiver na Moto, ou Chama o Dragão se estiver a pé!
+      if (padState.btnY) {
+        if (this.moto && this.moto.isMounted) {
+          this.moto.triggerHornBeep(260);
+        } else if (this.dragon && !this.dragon.isMounted) {
+          this.dragon.summon(this.player.group.position, this.orbitCamera.yaw);
+        }
       }
     }
   }
 
   updateHUDButtons(activePlayerPos) {
     const actionBtns = this.actionsPanel
-      ? this.actionsPanel.querySelectorAll('button:not(#btn-mount):not(#btn-ride):not(#btn-headlight):not(#btn-pause)')
+      ? this.actionsPanel.querySelectorAll(
+          'button:not(#btn-mount):not(#btn-summon-dragon):not(#btn-ride):not(#btn-headlight):not(#btn-horn):not(#btn-pause)'
+        )
       : [];
 
-    if (this.dragon && this.dragon.isLoaded && this.btnMount) {
+    // 1. Botões do Dragão (Montar vs Chamar Dragão)
+    if (this.dragon && this.dragon.isLoaded) {
       const distDragon = activePlayerPos.distanceTo(this.dragon.group.position);
+
       if (this.dragon.isMounted) {
-        this.btnMount.classList.remove('hidden');
-        this.btnMount.innerText = '🛑 Desmontar';
-      } else if (!this.moto.isMounted && distDragon <= 10.0) {
-        this.btnMount.classList.remove('hidden');
-        this.btnMount.innerText = '🐉 Montar (Botão X)';
+        if (this.btnMount) {
+          this.btnMount.classList.remove('hidden');
+          this.btnMount.innerText = '🛑 Desmontar (E / X)';
+        }
+        if (this.btnSummonDragon) this.btnSummonDragon.classList.add('hidden');
+      } else if (!this.moto.isMounted && distDragon <= 12.0) {
+        if (this.btnMount) {
+          this.btnMount.classList.remove('hidden');
+          this.btnMount.innerText = '🐉 Montar no Dragão (E / X)';
+        }
+        if (this.btnSummonDragon) this.btnSummonDragon.classList.add('hidden');
+      } else if (!this.moto.isMounted) {
+        if (this.btnMount) this.btnMount.classList.add('hidden');
+        if (this.btnSummonDragon) {
+          this.btnSummonDragon.classList.remove('hidden');
+          this.btnSummonDragon.innerText = this.dragon.isSummoned
+            ? '🐉 Dragão descendo...'
+            : '🐉 Chamar Dragão (C)';
+        }
       } else {
-        this.btnMount.classList.add('hidden');
+        if (this.btnMount) this.btnMount.classList.add('hidden');
+        if (this.btnSummonDragon) this.btnSummonDragon.classList.add('hidden');
       }
     }
 
+    // 2. Botões da Moto (Pilotar, Farol e Buzina)
     if (this.moto && this.moto.isLoaded && this.btnRide) {
       const distMoto = activePlayerPos.distanceTo(this.moto.group.position);
       if (this.moto.isMounted) {
         this.btnRide.classList.remove('hidden');
         this.btnRide.innerText = '🛑 Descer da Moto (E / X)';
+
         if (this.btnHeadlight) {
           this.btnHeadlight.classList.remove('hidden');
           this.btnHeadlight.innerText = this.moto.headlightOn ? '💡 Farol: ON (F)' : '💡 Farol: OFF (F)';
           this.btnHeadlight.style.borderColor = this.moto.headlightOn ? '#ffd700' : 'rgba(255,255,255,0.25)';
         }
+        if (this.btnHorn) {
+          this.btnHorn.classList.remove('hidden');
+          this.btnHorn.style.borderColor = this.moto.isHonking ? '#00f2fe' : 'rgba(255,255,255,0.25)';
+        }
       } else if (!this.dragon.isMounted && distMoto <= 4.5) {
         this.btnRide.classList.remove('hidden');
         this.btnRide.innerText = '🏍️ Pilotar (E / X)';
         if (this.btnHeadlight) this.btnHeadlight.classList.add('hidden');
+        if (this.btnHorn) this.btnHorn.classList.add('hidden');
       } else {
         this.btnRide.classList.add('hidden');
         if (this.btnHeadlight) this.btnHeadlight.classList.add('hidden');
+        if (this.btnHorn) this.btnHorn.classList.add('hidden');
       }
     }
 

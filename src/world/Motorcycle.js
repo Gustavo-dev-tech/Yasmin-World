@@ -82,8 +82,115 @@ export class Motorcycle {
     this.headlightOn = false;
     this._lastAutoEnvDark = null;
 
+    // Sistema de Buzina (Web Audio API)
+    this._audioCtx = null;
+    this._hornOsc1 = null;
+    this._hornOsc2 = null;
+    this._hornGain = null;
+    this.isHonking = false;
+
     this._buildHeadlightSystem();
     this._loadModel();
+  }
+
+  // =========================================================================
+  // SISTEMA DE BUZINA DA HONDA TWISTER 300 (DUPLO TOM REALISTA + LAMPEJO)
+  // =========================================================================
+  startHorn() {
+    if (this.isHonking || !this.isLoaded) return;
+    this.isHonking = true;
+
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        if (!this._audioCtx) this._audioCtx = new AudioContextClass();
+        if (this._audioCtx.state === 'suspended') this._audioCtx.resume();
+
+        const ctx = this._audioCtx;
+        const now = ctx.currentTime;
+
+        // Duplo oscilador harmônico (430 Hz + 516 Hz = timbre clássico de buzina de moto)
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+
+        osc1.type = 'sawtooth';
+        osc2.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(430, now);
+        osc2.frequency.setValueAtTime(516, now);
+
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(950, now);
+        filter.Q.setValueAtTime(1.4, now);
+
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.linearRampToValueAtTime(0.22, now + 0.02);
+
+        osc1.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+
+        this._hornOsc1 = osc1;
+        this._hornOsc2 = osc2;
+        this._hornGain = gain;
+      }
+    } catch (e) {
+      console.warn('[Motorcycle] Erro ao iniciar buzina:', e);
+    }
+
+    // Lampejo de farol alto (Pass Light) enquanto buzina
+    if (this.spotLight && this.headlightFlare) {
+      this.spotLight.intensity = 38.0;
+      this.bulbLight.intensity = 4.0;
+      this.headlightFlare.material.opacity = 1.0;
+      this.headlightFlare.scale.set(0.95, 0.95, 1);
+      this.lightBeamMesh.material.opacity = 0.14;
+    }
+  }
+
+  stopHorn() {
+    if (!this.isHonking) return;
+    this.isHonking = false;
+
+    try {
+      if (this._hornGain && this._audioCtx) {
+        const now = this._audioCtx.currentTime;
+        this._hornGain.gain.cancelScheduledValues(now);
+        this._hornGain.gain.setValueAtTime(this._hornGain.gain.value, now);
+        this._hornGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+
+        const o1 = this._hornOsc1;
+        const o2 = this._hornOsc2;
+        setTimeout(() => {
+          try { if (o1) o1.stop(); } catch (_) {}
+          try { if (o2) o2.stop(); } catch (_) {}
+        }, 50);
+      }
+    } catch (_) {}
+
+    this._hornOsc1 = null;
+    this._hornOsc2 = null;
+    this._hornGain = null;
+
+    // Restaura o estado original do farol após o lampejo
+    if (this.headlightFlare) {
+      this.headlightFlare.scale.set(0.65, 0.65, 1);
+    }
+    this.setHeadlight(this.headlightOn);
+  }
+
+  // Toque rápido de buzina ("Bibi!") para cliques simples
+  triggerHornBeep(durationMs = 220) {
+    this.startHorn();
+    clearTimeout(this._hornBeepTimeout);
+    this._hornBeepTimeout = setTimeout(() => {
+      this.stopHorn();
+    }, durationMs);
   }
 
   // =========================================================================
@@ -106,11 +213,9 @@ export class Motorcycle {
 
   _buildHeadlightSystem() {
     this.headlightGroup = new THREE.Group();
-    // Posicionado no bloco óptico DIANTEIRO (+Z)
     this.headlightGroup.position.set(0, 0.78, 0.82);
     this.leanGroup.add(this.headlightGroup);
 
-    // 1. SpotLight Principal apontando para a frente (+Z)
     this.spotLight = new THREE.SpotLight(0xf5faff, 0, 75, Math.PI / 4.2, 0.45, 1.3);
     this.spotLight.position.set(0, 0, 0);
     this.spotLight.castShadow = false;
@@ -121,12 +226,10 @@ export class Motorcycle {
     this.spotLight.target = this.spotTarget;
     this.headlightGroup.add(this.spotLight);
 
-    // 2. Luz curta de presença no farol dianteiro
     this.bulbLight = new THREE.PointLight(0xffffff, 0, 4.5, 2.0);
     this.bulbLight.position.set(0, 0, 0.08);
     this.headlightGroup.add(this.bulbLight);
 
-    // 3. Brilho óptico na lente dianteira (Flare Sprite)
     const flareTex = this._createLightFlareTexture();
     this.headlightFlare = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -143,12 +246,11 @@ export class Motorcycle {
     this.headlightFlare.position.set(0, 0, 0.05);
     this.headlightGroup.add(this.headlightFlare);
 
-    // 4. Cone Volumétrico abrindo para a frente (+Z)
     const coneLength = 14.0;
     const coneRadius = 3.2;
     const coneGeo = new THREE.ConeGeometry(coneRadius, coneLength, 24, 1, true);
     coneGeo.translate(0, -coneLength / 2, 0);
-    coneGeo.rotateX(-Math.PI / 2); // Abre o feixe na direção +Z (frente)
+    coneGeo.rotateX(-Math.PI / 2);
 
     this.lightBeamMesh = new THREE.Mesh(
       coneGeo,
@@ -161,10 +263,9 @@ export class Motorcycle {
         blending: THREE.AdditiveBlending
       })
     );
-    this.lightBeamMesh.rotation.x = 0.04; // Levemente inclinado para o asfalto à frente
+    this.lightBeamMesh.rotation.x = 0.04;
     this.headlightGroup.add(this.lightBeamMesh);
 
-    // 5. Lanterna Traseira / Luz de Freio Vermelha na rabeta (-Z)
     this.tailLightSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: flareTex,
@@ -260,7 +361,7 @@ export class Motorcycle {
       }
 
       this.isLoaded = true;
-      console.log('[Motorcycle] Honda Twister 300 pronta com luzes e direção corrigidas!');
+      console.log('[Motorcycle] Honda Twister 300 pronta com farol e buzina!');
     } catch (err) {
       console.error('[Motorcycle] Erro ao carregar moto_twister_300.glb:', err);
     }
@@ -285,6 +386,7 @@ export class Motorcycle {
       }
       this._applyRiderPose(player, true);
     } else {
+      this.stopHorn();
       this._applyRiderPose(player, false);
 
       const dismountPos = this.group.position.clone();
@@ -340,17 +442,13 @@ export class Motorcycle {
       const isLeft = clean.includes('left') || clean.startsWith('l') || clean.endsWith('l');
       const sideSign = isLeft ? 1 : -1;
 
-      // 1. Tronco, Cabeça e Ombros
       if (clean === 'spine' || clean === 'spine1' || clean === 'spine01' || clean === 'spine2' || clean === 'spine02') {
         child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.spinePitch));
       } else if (clean === 'neck' || clean === 'head') {
         child.quaternion.copy(baseQuat).multiply(q(1, 0, 0, c.headPitch));
       } else if (clean === 'leftshoulder' || clean === 'rightshoulder') {
         child.quaternion.copy(baseQuat).multiply(q(0, 1, 0, c.shoulderFwd * sideSign));
-      }
-
-      // 2. Braços e Antebraços
-      else if (clean === 'leftarm' || clean === 'rightarm') {
+      } else if (clean === 'leftarm' || clean === 'rightarm') {
         const downQ = q(0, 0, 1, c.armDown * sideSign);
         const fwdQ = q(1, 0, 0, c.armForward);
         const twistQ = q(0, 1, 0, c.armTwist * sideSign);
@@ -359,18 +457,12 @@ export class Motorcycle {
         const bendQ = q(1, 0, 0, c.elbowBend);
         const twistQ = q(0, 1, 0, c.forearmTwist * sideSign);
         child.quaternion.copy(baseQuat).multiply(bendQ).multiply(twistQ);
-      }
-
-      // 3. Punhos / Mãos
-      else if (clean === 'lefthand' || clean === 'righthand') {
+      } else if (clean === 'lefthand' || clean === 'righthand') {
         const pitchQ = q(1, 0, 0, c.wristPitch);
         const yawQ = q(0, 0, 1, c.wristYaw * sideSign);
         const rollQ = q(0, 1, 0, c.wristRoll * sideSign);
         child.quaternion.copy(baseQuat).multiply(pitchQ).multiply(yawQ).multiply(rollQ);
-      }
-
-      // 4. Dedos e Manetes
-      else if (clean.includes('thumb')) {
+      } else if (clean.includes('thumb')) {
         const curlQ = q(1, 0, 0, c.thumbCurl);
         const spreadQ = q(0, 0, 1, c.thumbSpread * sideSign);
         child.quaternion.copy(baseQuat).multiply(spreadQ).multiply(curlQ);
@@ -382,10 +474,7 @@ export class Motorcycle {
         const curlX = q(1, 0, 0, c.gripCurlX);
         const curlZ = q(0, 0, 1, c.gripCurlZ * sideSign);
         child.quaternion.copy(baseQuat).multiply(curlX).multiply(curlZ);
-      }
-
-      // 5. Pernas e Pés
-      else if (clean === 'leftupleg' || clean === 'rightupleg') {
+      } else if (clean === 'leftupleg' || clean === 'rightupleg') {
         const liftQ = q(1, 0, 0, c.thighLift);
         const spreadQ = q(0, 0, 1, c.thighSpread * sideSign);
         const twistQ = q(0, 1, 0, c.thighTwist * sideSign);
@@ -401,7 +490,6 @@ export class Motorcycle {
   update(delta, player, input, dayNight = null) {
     if (!this.isLoaded) return;
 
-    // Sensor crepuscular automático (noite ou chuva)
     if (dayNight) {
       const isEnvDark = Boolean(
         (dayNight.isNight && dayNight.isNight()) ||
@@ -423,14 +511,12 @@ export class Motorcycle {
       const { forward, right, isRunning } = input.getMovement();
       const currentMaxSpeed = isRunning ? this.boostSpeed : this.maxSpeed;
 
-      // Luz de freio traseira mais forte ao apertar S / puxar joystick para trás
       const isBraking = forward < -0.05;
       if (this.tailLightSprite) {
         this.tailLightSprite.material.opacity = isBraking ? 1.0 : (this.headlightOn ? 0.65 : 0.0);
         this.tailLightSprite.scale.setScalar(isBraking ? 0.48 : 0.35);
       }
 
-      // 1. Aceleração (W / Touch Cima -> forward > 0) e Freio/Ré (S / Touch Baixo -> forward < 0)
       if (forward > 0.05) {
         this.speed += forward * this.acceleration * delta;
       } else if (forward < -0.05) {
@@ -449,7 +535,6 @@ export class Motorcycle {
 
       this.speed = THREE.MathUtils.clamp(this.speed, this.maxReverseSpeed, currentMaxSpeed);
 
-      // 2. Curva (A = esquerda, D = direita) e Inclinação (Lean)
       const speedFactor = Math.min(Math.abs(this.speed) / 8.0, 1.0);
       const reverseDir = this.speed >= 0 ? 1 : -1;
 
@@ -461,7 +546,6 @@ export class Motorcycle {
       this.currentLean = THREE.MathUtils.lerp(this.currentLean, targetLean, delta * 8);
       this.leanGroup.rotation.z = this.currentLean;
 
-      // 3. Deslocamento na direção +Z local (Frente real da moto e da personagem!)
       const moveDist = this.speed * delta;
       this.group.position.x += Math.sin(this.group.rotation.y) * moveDist;
       this.group.position.z += Math.cos(this.group.rotation.y) * moveDist;

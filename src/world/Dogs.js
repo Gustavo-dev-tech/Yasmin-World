@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { PATHS } from '../config.js';
 
 export class Dogs {
   constructor({ scene, player }) {
@@ -9,9 +10,34 @@ export class Dogs {
     this.fbxLoader = new FBXLoader();
     this.textureLoader = new THREE.TextureLoader();
 
+    const baseFolder = PATHS?.creatures?.dogFolder || './assets/models/creatures/';
+    this.baseFolder = baseFolder;
+    this.fallbackFolder = './assets/models/';
+
     this.dogBreeds = [
-      { id: 'golden', name: 'Pastor Alemão', modelUrl: 'assets/models/dog_mesh.fbx', targetHeight: 0.75 },
+      { id: 'golden', name: 'Pastor Alemão', fileName: 'dog_mesh.fbx', targetHeight: 0.75 },
     ];
+  }
+
+  // Permite que o Dragon.js oculte/mostre o cachorro ao montar/desmontar
+  get companion() {
+    return this.activeCompanion ? this.activeCompanion.model : null;
+  }
+
+  async _loadTexWithFallback(fileName) {
+    try {
+      return await this.textureLoader.loadAsync(`${this.baseFolder}${fileName}`);
+    } catch (_) {
+      return await this.textureLoader.loadAsync(`${this.fallbackFolder}${fileName}`);
+    }
+  }
+
+  async _loadFbxWithFallback(fileName) {
+    try {
+      return await this.fbxLoader.loadAsync(`${this.baseFolder}${fileName}`);
+    } catch (_) {
+      return await this.fbxLoader.loadAsync(`${this.fallbackFolder}${fileName}`);
+    }
   }
 
   async spawnCompanion(breedId = 'golden') {
@@ -22,9 +48,9 @@ export class Dogs {
       let mapB = null, mapN = null, mapR = null;
       try {
         const [texB, texN, texR] = await Promise.all([
-          this.textureLoader.loadAsync('assets/models/dog_b.png'),
-          this.textureLoader.loadAsync('assets/models/dog_n.png'),
-          this.textureLoader.loadAsync('assets/models/dog_r.png'),
+          this._loadTexWithFallback('dog_b.png'),
+          this._loadTexWithFallback('dog_n.png'),
+          this._loadTexWithFallback('dog_r.png'),
         ]);
 
         texB.colorSpace = THREE.SRGBColorSpace;
@@ -40,7 +66,7 @@ export class Dogs {
       }
 
       // 2. Modelo FBX Principal
-      const dogModel = await this.fbxLoader.loadAsync(breed.modelUrl);
+      const dogModel = await this._loadFbxWithFallback(breed.fileName);
 
       dogModel.traverse((child) => {
         if (child.isMesh) {
@@ -83,10 +109,10 @@ export class Dogs {
       const actions = {};
 
       const [runFbx, walkFbx, idleFbx, playFbx] = await Promise.all([
-        this.fbxLoader.loadAsync('assets/models/dog_run.fbx').catch(() => null),
-        this.fbxLoader.loadAsync('assets/models/dog_walk.fbx').catch(() => null),
-        this.fbxLoader.loadAsync('assets/models/dog_idle.fbx').catch(() => null),
-        this.fbxLoader.loadAsync('assets/models/dog_play.fbx').catch(() => null),
+        this._loadFbxWithFallback('dog_run.fbx').catch(() => null),
+        this._loadFbxWithFallback('dog_walk.fbx').catch(() => null),
+        this._loadFbxWithFallback('dog_idle.fbx').catch(() => null),
+        this._loadFbxWithFallback('dog_play.fbx').catch(() => null),
       ]);
 
       if (runFbx && runFbx.animations && runFbx.animations.length > 0) {
@@ -100,7 +126,6 @@ export class Dogs {
       }
       if (playFbx && playFbx.animations && playFbx.animations.length > 0) {
         actions['play'] = mixer.clipAction(playFbx.animations[0]);
-        // Configura a animação de brincar para não fazer loop infinito contínuo
         actions['play'].setLoop(THREE.LoopOnce);
         actions['play'].clampWhenFinished = true;
       }
@@ -127,14 +152,14 @@ export class Dogs {
         playAnimTimer: 0,
       };
 
-      console.log('[Dogs] Pastor Alemão pronto com ciclos de brincar (4s / 10s)!');
+      console.log('[Dogs] Companheiro canino pronto!');
     } catch (err) {
-      console.error(`[Dogs] Erro ao carregar "${breed.modelUrl}":`, err);
+      console.error(`[Dogs] Erro ao carregar "${breed.fileName}":`, err);
     }
   }
 
   update(delta) {
-    if (!this.activeCompanion || !this.player) return;
+    if (!this.activeCompanion || !this.player || !this.activeCompanion.model.visible) return;
 
     const dog = this.activeCompanion;
     const playerPos = this.player.group.position;
@@ -157,7 +182,6 @@ export class Dogs {
       extraY = 0.03;
       this._resetIdleCounters(dog);
     } else {
-      // Comportamento Parado (Idle + Ciclos da Animação de Brincar)
       if (dog.isPlayingAnim) {
         dog.playAnimTimer += delta;
         targetAction = 'play';
@@ -165,7 +189,7 @@ export class Dogs {
         if (dog.playAnimTimer >= dog.playDuration) {
           dog.isPlayingAnim = false;
           dog.playAnimTimer = 0;
-          dog.cycleTimer = 0; // Reinicia a contagem dos 10 segundos
+          dog.cycleTimer = 0;
           targetAction = 'idle';
         }
       } else {
@@ -186,7 +210,6 @@ export class Dogs {
       }
     }
 
-    // Suavização de altura Y sobre o solo
     const targetY = playerPos.y + dog.baseYOffset + extraY;
     dogPos.y = THREE.MathUtils.lerp(dogPos.y, targetY, delta * 8);
 
@@ -209,7 +232,6 @@ export class Dogs {
       dog.model.rotation.z = THREE.MathUtils.lerp(dog.model.rotation.z, 0, delta * 6);
     }
 
-    // Gerenciador de Transições de Animação
     if (dog.actions[targetAction] && dog.currentAction !== targetAction) {
       const prevAction = dog.actions[dog.currentAction];
       const nextAction = dog.actions[targetAction];

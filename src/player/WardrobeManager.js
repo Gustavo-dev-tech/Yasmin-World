@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { CONFIG } from '../config.js';
+import { CONFIG, PATHS } from '../config.js';
 
 export const DEFAULT_OUTFITS = {
-  vestido_branco: './assets/models/vestuario/garota_vestido_branco.glb',
-  rosa: './assets/models/vestuario/garota_rosa.glb',
-  gustavo: './assets/models/gustavo.glb'
+  padrao: PATHS.characters.yasmin,
+  yasmin: PATHS.characters.yasmin,
+  vestido_branco: PATHS.characters.vestidoBranco,
+  rosa: PATHS.characters.garotaRosa,
+  gustavo: PATHS.characters.gustavo
 };
 
 export const DEFAULT_HELMETS = {
@@ -57,8 +59,8 @@ export class WardrobeManager {
     window.addEventListener('keydown', (e) => {
       if (!this.currentHelmet) return;
 
-      // Tecla H alterna entre Cabelo Contínuo, Cabelo Escondido no Capacete e Cabelo Normal
-      if (e.key.toLowerCase() === 'h') {
+      // Tecla J alterna entre Cabelo Contínuo, Cabelo Escondido no Capacete e Cabelo Normal (deixando H livre para a Buzina)
+      if (e.key.toLowerCase() === 'j') {
         this.currentHairModeIndex = (this.currentHairModeIndex + 1) % this.hairModes.length;
         this.applyHelmetHairState(true);
         console.log(`[Capacete] Modo de cabelo alterado para: ${this.hairModes[this.currentHairModeIndex].toUpperCase()}`);
@@ -116,7 +118,6 @@ export class WardrobeManager {
     }
   }
 
-  // Corrige o "corte" na nuca: comprime apenas o topo do crânio (t > 0.58) sem puxar a nuca para dentro do pescoço
   applyHelmetHairState(isHelmetOn) {
     const model = this.controller.model;
     if (!model) return;
@@ -142,7 +143,6 @@ export class WardrobeManager {
         const original = child.userData.originalHairPositions;
         const current = posAttr.array;
 
-        // Se tirou o capacete, restaura tudo
         if (!isHelmetOn) {
           child.visible = true;
           current.set(original);
@@ -150,13 +150,11 @@ export class WardrobeManager {
           return;
         }
 
-        // Modo 'hidden': esconde o cabelo longo (100% dentro do capacete fechado)
         if (mode === 'hidden') {
           child.visible = false;
           return;
         }
 
-        // Modo 'normal': mostra o cabelo sem compressão
         if (mode === 'normal') {
           child.visible = true;
           current.set(original);
@@ -164,7 +162,6 @@ export class WardrobeManager {
           return;
         }
 
-        // Modo 'dome' (Padrão): encolhe apenas a calota superior (t > 0.58) mantendo a nuca intacta!
         child.visible = true;
         let minY = Infinity, maxY = -Infinity;
         const count = posAttr.count;
@@ -177,7 +174,6 @@ export class WardrobeManager {
 
         const heightSpan = Math.max(maxY - minY, 0.001);
 
-        // Calcula o centro apenas da parte superior da cabeça (t > 0.6) para não puxar para o pescoço
         let topSumX = 0, topSumZ = 0, topCount = 0;
         for (let i = 0; i < count; i++) {
           const y = original[i * 3 + 1];
@@ -197,8 +193,6 @@ export class WardrobeManager {
           const oz = original[i * 3 + 2];
 
           const t = (oy - minY) / heightSpan;
-
-          // Só começa a comprimir acima de 56% da altura (dentro do casco), preservando a nuca!
           const crownFactor = THREE.MathUtils.smoothstep(t, 0.56, 0.78);
 
           current[i * 3]     = THREE.MathUtils.lerp(ox, skullCenterX, crownFactor * 0.42);
@@ -281,7 +275,7 @@ export class WardrobeManager {
 
       this.applyHelmetHairState(true);
       this.controller.playTrigger('victory');
-      console.log(`[Wardrobe] Capacete "${helmetKey}" equipado! Pressione 'H' para alternar o estilo do cabelo.`);
+      console.log(`[Wardrobe] Capacete "${helmetKey}" equipado! Pressione 'J' para alternar o estilo do cabelo.`);
     } catch (err) {
       console.error(`[WardrobeManager] Erro ao carregar capacete "${helmetKey}":`, err);
     }
