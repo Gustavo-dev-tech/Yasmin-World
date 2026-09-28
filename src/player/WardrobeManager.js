@@ -36,6 +36,75 @@ export const DEFAULT_HELMETS = {
   }
 };
 
+// ============================================================================
+// SHADER DE TECIDO E CABELO ESTILO FIFA / EA SPORTS FC (FORA DA CLASSE)
+// ============================================================================
+export const CLOTH_UNIFORMS = {
+  uTime: { value: 0 },
+  uMoveSpeed: { value: 0 },
+  uWindStrength: { value: 1.0 }
+};
+
+export function applyFIFAClothShader(material, isHair = false) {
+  if (!material || material.userData.hasClothShader) return;
+  material.userData.hasClothShader = true;
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = CLOTH_UNIFORMS.uTime;
+    shader.uniforms.uMoveSpeed = CLOTH_UNIFORMS.uMoveSpeed;
+    shader.uniforms.uWindStrength = CLOTH_UNIFORMS.uWindStrength;
+
+    // 1. Declara os uniforms no Vertex Shader
+    shader.vertexShader = `
+      uniform float uTime;
+      uniform float uMoveSpeed;
+      uniform float uWindStrength;
+      varying float vClothWave;
+    ` + shader.vertexShader;
+
+    // 2. Injeta a ondulação de tecido logo após calcular a posição base do vértice
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `
+      #include <begin_vertex>
+
+      float speedFactor = clamp(uMoveSpeed / 22.0, 0.0, 2.5);
+      float freq = ${isHair ? '14.0' : '22.0'};
+      float timeSpeed = uTime * (4.0 + speedFactor * 14.0);
+
+      float wave1 = sin(position.y * freq + position.x * (freq * 0.8) - timeSpeed);
+      float wave2 = cos(position.z * (freq * 1.1) - position.y * (freq * 0.6) + timeSpeed * 1.3);
+
+      // (wave * 0.5 + 0.5) garante que o tecido só infle para fora (sem atravessar a pele)
+      float ripple = (wave1 * 0.6 + wave2 * 0.4) * 0.5 + 0.5;
+
+      float amplitude = (${isHair ? '0.006' : '0.0035'} + speedFactor * ${isHair ? '0.018' : '0.012'}) * uWindStrength;
+
+      transformed += objectNormal * (ripple * amplitude);
+      vClothWave = ripple * speedFactor;
+      `
+    );
+
+    // 3. Micro-sombras dinâmicas das dobras do tecido no Fragment Shader
+    shader.fragmentShader = `
+      varying float vClothWave;
+    ` + shader.fragmentShader;
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `
+      gl_FragColor.rgb *= mix(1.0, 0.88 + vClothWave * 0.24, clamp(vClothWave, 0.0, 1.0));
+      #include <dithering_fragment>
+      `
+    );
+  };
+
+  material.needsUpdate = true;
+}
+
+// ============================================================================
+// GERENCIADOR DE VESTUÁRIO, CAPACETES E MATERIAIS DOS PERSONAGENS
+// ============================================================================
 export class WardrobeManager {
   constructor(controller) {
     this.controller = controller;
@@ -48,9 +117,12 @@ export class WardrobeManager {
     this.currentHelmetKey = null;
     this.headBoneScale = 1;
 
-    // Modos de cabelo com capacete: 'dome' (contínuo nos ombros), 'hidden' (preso dentro), 'normal'
     this.hairModes = ['dome', 'hidden', 'normal'];
     this.currentHairModeIndex = 0;
+
+    this._lastWorldPos = new THREE.Vector3();
+    this._currentWorldPos = new THREE.Vector3();
+    this._lastFrameTime = performance.now();
 
     this._setupHelmetTunerKeys();
   }
@@ -59,7 +131,7 @@ export class WardrobeManager {
     window.addEventListener('keydown', (e) => {
       if (!this.currentHelmet) return;
 
-      // Tecla J alterna entre Cabelo Contínuo, Cabelo Escondido no Capacete e Cabelo Normal (deixando H livre para a Buzina)
+      // Tecla J alterna entre Cabelo Contínuo, Cabelo Escondido e Cabelo Normal (deixando H livre para a Buzina)
       if (e.key.toLowerCase() === 'j') {
         this.currentHairModeIndex = (this.currentHairModeIndex + 1) % this.hairModes.length;
         this.applyHelmetHairState(true);
@@ -87,17 +159,84 @@ export class WardrobeManager {
   }
 
   prepareMaterials(model) {
+    let updaterAttached = false;
+
     model.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
       child.receiveShadow = true;
       child.frustumCulled = false;
 
+      const meshName = (child.name || '').toLowerCase();
+
+      // Atualiza uTime e uMoveSpeed automaticamente a cada frame renderizado
+      if (!updaterAttached) {
+        updaterAttached = true;
+        child.onBeforeRender = () => {
+          const now = performance.now();
+          const dt = Math.min((now - this._lastFrameTime) / 1000, 0.1);
+          if (dt > 0.004) {
+            this._lastFrameTime = now;
+            CLOTH_UNIFORMS.uTime.value = now * 0.001;
+
+            if (this.controller?.group) {
+              this.controller.group.getWorldPosition(this._currentWorldPos);
+              const dist = this._currentWorldPos.distanceTo(this._lastWorldPos);
+              const instantSpeed = dist / dt;
+              // Ignora saltos bruscos de teleporte (> 120 m/s) e suaviza a velocidade
+              if (instantSpeed < 120) {
+                CLOTH_UNIFORMS.uMoveSpeed.value = THREE.MathUtils.lerp(
+                  CLOTH_UNIFORMS.uMoveSpeed.value,
+                  instantSpeed,
+                  0.15
+                );
+              }
+              this._lastWorldPos.copy(this._currentWorldPos);
+            }
+          }
+        };
+      }
+
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       materials.forEach((mat) => {
         if (!mat) return;
         if ('metalness' in mat) mat.metalness = 0.0;
         if ('roughness' in mat) mat.roughness = 0.6;
+
+        const matName = (mat.name || '').toLowerCase();
+        const combinedName = `${meshName} ${matName}`;
+
+        const isSkinOrRigid =
+          combinedName.includes('body') ||
+          combinedName.includes('skin') ||
+          combinedName.includes('head') ||
+          combinedName.includes('face') ||
+          combinedName.includes('eye') ||
+          combinedName.includes('teeth') ||
+          combinedName.includes('tooth') ||
+          combinedName.includes('shoe') ||
+          combinedName.includes('footwear') ||
+          combinedName.includes('glasses') ||
+          combinedName.includes('oculos');
+
+        const isHair = combinedName.includes('hair') || combinedName.includes('cabelo');
+        const isCloth =
+          combinedName.includes('top') ||
+          combinedName.includes('shirt') ||
+          combinedName.includes('camisa') ||
+          combinedName.includes('bottom') ||
+          combinedName.includes('pants') ||
+          combinedName.includes('calca') ||
+          combinedName.includes('dress') ||
+          combinedName.includes('vestido') ||
+          combinedName.includes('outfit') ||
+          combinedName.includes('cloth');
+
+        if (isHair) {
+          applyFIFAClothShader(mat, true);
+        } else if (isCloth || !isSkinOrRigid) {
+          applyFIFAClothShader(mat, false);
+        }
       });
     });
   }
